@@ -3,12 +3,63 @@
 import { useEffect, useState, useRef } from "react"
 
 const operators = "+-/*^|&=<>"
-const delimiters = " .;,:(){}[]'`\""
+const delimiters = " .?;,:(){}[]`"
 const numbers = "0123456789"
 const keywords = [
   'let', 'const', 'var', 'from', 'import', 'export', 'default', 'function', 'async', 
-  'await', 'true', 'false', 'null', 'undefined', 'void', 'return', 'if', 'else'
+  'await', 'true', 'false', 'null', 'undefined', 'void', 'return', 'if', 'else', 'for'
 ]
+
+function styleCode(token: string, classStr: string) {
+  let codeElement = document.createElement("code")
+  codeElement.textContent = token
+  codeElement.className = classStr
+  return codeElement;
+}
+
+function highlightCode(text: string) { // js only for now
+  let token = ""
+  let openedQuotesType = "" // stores the type of opened quotes (' or ") any is encountered during the loop
+  let highlightedCode = []
+
+  for (let i=0; i<text.length; i++) {
+    let char = text[i]
+    token += char
+
+    if (char === '"' || char === "'") {
+      openedQuotesType = (openedQuotesType === char ? "" : char)
+      if (!openedQuotesType) {
+        highlightedCode.push(styleCode(token, "text-green-300"))
+      }
+      continue
+    }
+    if (openedQuotesType) {
+      continue
+    }
+    if (text[i] === '/' && text[i+1] === '/') {
+      highlightedCode.push(styleCode(text.slice(i, text.length), "text-gray-400"))
+      break
+    }
+    let styledToken2 = null
+    if (delimiters.includes(char)) {
+      styledToken2 = styleCode(char, "text-gray-400")
+      token = token.slice(0, token.length-1)
+    }else if (operators.includes(char)) {
+      styledToken2 = styleCode(char, "text-orange-500")
+      token = token.slice(0, token.length-1)
+    }
+    if (styledToken2 || (i === text.length-1)) {
+      if ( !isNaN(token * 0) ) {
+        highlightedCode.push(styleCode(token, "text-orange-300"))
+      }else if (keywords.includes(token)) {
+        highlightedCode.push(styleCode(token, "text-violet-500"))
+      }else highlightedCode.push(styleCode(token, "text-white"))
+      token = ""
+    }
+    styledToken2 && highlightedCode.push(styledToken2)
+  }
+  return highlightedCode
+}
 
 function LineOfCode({addNewLine, lineNo, focused} : {addNewLine: (num: number)=>void, lineNo: number, focused: boolean}) {
   useEffect(() => {
@@ -19,8 +70,16 @@ function LineOfCode({addNewLine, lineNo, focused} : {addNewLine: (num: number)=>
   
   const preElement = useRef<HTMLPreElement>(null)
 
-  function reformatInput(event) { // for testing arbitrary insertion and deletion in input
-    event.preventDefault();
+  function reformatInput(event) {
+    let insertedText = ""
+    if (event.type === "paste") {
+      insertedText = event.clipboardData.getData("text")
+    }else {
+      insertedText = event.data || ''
+    }
+    if (event.type !== "keyup") {
+      event.preventDefault();
+    }
     if (!preElement.current) { // this will never happen 
       return // typescript can rest now
     }
@@ -28,20 +87,10 @@ function LineOfCode({addNewLine, lineNo, focused} : {addNewLine: (num: number)=>
     let range = selection.getRangeAt(0)
     range.setStart(preElement.current, 0)
     let caretOffset = range.toString().length
-    let insertedText = ""
-    if (event.type === "paste") {
-      insertedText = event.clipboardData.getData("text")
-    }else {
-      insertedText = event.data
-    }
-    let length = event.target.textContent.length
-
-    let newText = event.target.textContent.slice(0, caretOffset) + insertedText + event.target.textContent.slice(caretOffset, length)
-    let codeTag =  document.createElement("code")
-    let htmlTextList = newText.split(' ').map((word, index) => {
-      codeTag.textContent = word.toUpperCase()
-      return codeTag.cloneNode(true)
-    })
+    let length = preElement.current.textContent.length
+    let newText = preElement.current.textContent.slice(0, caretOffset) + insertedText + preElement.current.textContent.slice(caretOffset, length)
+    
+    let htmlTextList = highlightCode(newText)
     preElement.current.innerHTML = ""
     preElement.current.append(...htmlTextList)
     let newCaretOffset = caretOffset + insertedText.length
@@ -56,15 +105,22 @@ function LineOfCode({addNewLine, lineNo, focused} : {addNewLine: (num: number)=>
       addNewLine(lineNo)
     }
   }
+
+  function deleteText(event) {
+    if (event.key === "Backspace") {
+      reformatInput(event)
+    }
+  }
   return (
     <div className="flex bg-sky-800">
-    <span className="text-gray-300 font-semibold w-6 pl-2">{lineNo}</span>
-     <pre id="fat" contentEditable spellCheck="false" onKeyDown={gotoNextLine} onBeforeInput={reformatInput} onPaste={reformatInput}
+    <span className="text-gray-300 w-6 pl-2">{lineNo}</span>
+     <pre id="fat" contentEditable spellCheck="false" onKeyUp={deleteText} onKeyDown={gotoNextLine} onBeforeInput={reformatInput} onPaste={reformatInput}
      ref={preElement} className="text-white px-4 caret-amber-600 focus:outline-0 focus:outline-transparent focus:bg-sky-900 flex-grow"></pre>
     </div>
    
   )
 }
+
 
 export default function Editor() {
   const [linesKeys, setLinesKeys] = useState([1])
@@ -98,121 +154,3 @@ export default function Editor() {
     </section>
   )
 }
-
-
-
-
-
-/*export default function Editor() {
-  useEffect(() => {
-    document.addEventListener("keydown", (event)=>{
-    })
-  })
-  const [formattedInput, setFormattedInput] = useState([])
-  const prevValue = useRef("")
-  const preElement = useRef(null)
-
-  function reformatInput(event: any) {
-    event.preventDefault()
-    let selection:any = window.getSelection()
-    let range = document.createRange()
-    let firstNode = preElement.current.querySelector("code")
-    let caretOffset = 0
-
-    if (firstNode) {
-      range.setStart(firstNode, 0)
-      range.setEnd(selection.getRangeAt(0).startContainer, 0)
-      caretOffset = range.toString().length + selection.getRangeAt(0).startOffset
-    }
-
-    let word = ""
-    let newInput = []
-    let codeObj = document.createElement("code")
-    let openedQuotes = false
-    let newText = ""
-    let insertedText = ""
-    if (event.type === "paste") {
-      insertedText = event.clipboardData.getData("text")
-    }else {
-      insertedText = event.data
-    }
-
-    let length = event.target.textContent.length
-    if (caretOffset === event.target.textContent.length) {
-      newText = event.target.textContent + insertedText
-    }else {
-      newText = event.target.textContent.slice(0, caretOffset) + insertedText + event.target.textContent.slice(caretOffset, length)
-    }
-    let nodeIndex = null
-    function styleCode(word, colorClass, i) {
-      if (word.length+i > caretOffset+insertedText.length) {
-        let index = (word.length+i) - (caretOffset+insertedText.length)
-        let word1 = word.slice(0, index+1)
-        let word2 = word.slice(index+1, word.length)
-        codeObj.className = colorClass
-        codeObj.textContent = word1
-        newInput.push(codeObj.cloneNode(true))
-        codeObj.textContent = word2
-        nodeIndex = newInput.push(codeObj.cloneNode(true))
-      }
-      codeObj.textContent = word
-      codeObj.className = colorClass
-      newInput.push(codeObj.cloneNode(true))
-    }
-
-    for (let i=0; i<newText.length; i++) {
-      let char = newText[i]
-      if (newText[i] === '/' && newText[i+1] === '/') {
-        styleCode(newText.slice(i, newText.length), "text-gray-400", i)
-        break
-      }
-
-      if (openedQuotes) {
-        word += char
-        continue
-      }
-      // todo: fn calls, spread operator
-      if (delimiters.includes(char) || operators.includes(char) || i===newText.length-1) {
-        if (char === '"' || char === "'") {
-          openedQuotes = !openedQuotes
-          if (!openedQuotes) {
-            styleCode(word, "text-green-300", i)
-          }
-        }else if (keywords.includes(word)) {
-          styleCode(word, "text-violet-500", i)
-        }else if (!isNaN(parseFloat(word))){ // word string represents a number
-          styleCode(word, "text-amber-500", i)
-        }else {
-          styleCode(word, "text-gray-200", i)
-        }
-        if (delimiters.includes(char)) {
-          char !== '"' && styleCode(char, "text-gray-400", i)
-        }else styleCode(char, "text-orange-500", i)
-        word = ""
-        continue
-      }
-      word += char
-    }
-    if (word) {
-      codeObj.textContent = word
-      newInput.push(codeObj.cloneNode(true))
-    }
-    preElement.current.innerHTML = ''
-    // const fragment = new DocumentFragment()
-    preElement.current.append(...newInput)
-    console.log(newInput[nodeIndex], nodeIndex)
-    if (firstNode) {
-      range.setStart(newInput[nodeIndex], 0)
-      range.setEnd(newInput[nodeIndex], 0)
-      selection.addRange(range)
-    }else selection.collapseToEnd()
-  }
-
-  return (
-    <pre id="fat" contentEditable spellCheck="false" onBeforeInput={reformatInput} onPaste={reformatInput}
-     ref={preElement} className="text-white bg-sky-800 px-4 caret-amber-600"></pre>
-  )
-}*/
-
-
-//let i = 0; i++
