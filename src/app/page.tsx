@@ -12,15 +12,42 @@ const keywords = [
 
 function LineOfCode({addNewLine, lineNo, focused} : {addNewLine: (num: number)=>void, lineNo: number, focused: boolean}) {
   useEffect(() => {
-    if (focused) {
+    if (focused && preElement.current) {
       preElement.current.focus()
     }
   }, [focused])
   
-  const preElement = useRef(null)
+  const preElement = useRef<HTMLPreElement>(null)
 
-  function reformatInput() {
-    //
+  function reformatInput(event) { // for testing arbitrary insertion and deletion in input
+    event.preventDefault();
+    if (!preElement.current) { // this will never happen 
+      return // typescript can rest now
+    }
+    let selection:any = window.getSelection()
+    let range = selection.getRangeAt(0)
+    range.setStart(preElement.current, 0)
+    let caretOffset = range.toString().length
+    let insertedText = ""
+    if (event.type === "paste") {
+      insertedText = event.clipboardData.getData("text")
+    }else {
+      insertedText = event.data
+    }
+    let length = event.target.textContent.length
+
+    let newText = event.target.textContent.slice(0, caretOffset) + insertedText + event.target.textContent.slice(caretOffset, length)
+    let codeTag =  document.createElement("code")
+    let htmlTextList = newText.split(' ').map((word, index) => {
+      codeTag.textContent = word.toUpperCase()
+      return codeTag.cloneNode(true)
+    })
+    preElement.current.innerHTML = ""
+    preElement.current.append(...htmlTextList)
+    let newCaretOffset = caretOffset + insertedText.length
+    for (let i=0; i<newCaretOffset; i++) {
+      selection.modify("move", "right", "character")
+    }  
   }
 
   function gotoNextLine(event) {
