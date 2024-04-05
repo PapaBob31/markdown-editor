@@ -3,8 +3,10 @@
 import { useEffect, useState, useRef } from "react"
 
 const operators = ["...", "in", '+', '?', '-', '/', '*', '^', '|', '&', '=', '<', '>']
-const delimiters = " .;,:(){}[]`"
+const delimiters = " .;,:(){}[]\n`"
 const numbers = "0123456789"
+const lineComment = "//"
+const multiLineComment = "/*"
 const keywords = [
   'let', 'const', 'var', 'from', 'import', 'export', 'default', 'function', 'async', 
   'await', 'void', 'return', 'if', 'else', 'for', 'class', "=>"
@@ -15,12 +17,14 @@ function styleCode(token: string, classStr: string) {
   let codeElement = document.createElement("code")
   codeElement.textContent = token
   codeElement.className = classStr
+  // codeElement.contentEditable = editable
   return codeElement;
 }
 
+
 // TODO:
 // HTML, CSS
-// escape chars e.g \t, \n
+// escape chars e.g \t, \n, template literals
 
 function highlightCode(text: string) { // js only for now
   let token = ""
@@ -30,11 +34,31 @@ function highlightCode(text: string) { // js only for now
   let currentTokenType = null
   let i = 0;
   let stringNotParsed = true
+  let commentStartPos = -1
+  let commentEndPos = -1
+  let commentType = ""
+  let newLine = false
+  let lineCount = 0
 
   while (stringNotParsed) {
     let char = ( i < text.length ? text[i] : "")
 
-    if (char === '"' || char === "'") {
+    if (token === lineComment || token === multiLineComment) {
+      commentType = token
+      if (commentStartPos < 0) commentStartPos = i - (commentType.length)
+    }
+
+    if (commentStartPos >= 0) {
+      if (commentType === '//' && char === '\n') {
+        commentEndPos = i
+        prevTokenType = "comment"
+      }else if (commentType === '/*' && token.endsWith('*/')) {
+        commentEndPos = i
+        prevTokenType = "comment"
+      } 
+    }
+
+    if (commentStartPos < 0 && (char === '"' || char === "'" || char === '`')) {
       if (openedQuotesType){ 
         if (openedQuotesType === char) {
           openedQuotesType = ''
@@ -44,7 +68,7 @@ function highlightCode(text: string) { // js only for now
         prevTokenType = currentTokenType
         currentTokenType = "string"
       }
-    }else if (!openedQuotesType && char) {
+    }else if (!openedQuotesType && char && commentStartPos < 0) {
       if (delimiters.includes(char)) {
         if (currentTokenType !== 'delimiter') {
           prevTokenType = currentTokenType
@@ -65,11 +89,25 @@ function highlightCode(text: string) { // js only for now
       if (currentTokenType) {
         prevTokenType = currentTokenType
       }
+      if (commentStartPos >= 0) {
+        commentEndPos = i
+        prevTokenType = "comment"
+      }
       stringNotParsed = false
     }
 
+    if (token.endsWith('\n')) {
+      prevTokenType = "hasNewLine"
+      currentTokenType = null
+    }
+
     if (prevTokenType) {
-      if (prevTokenType === "string") {
+      if (prevTokenType === "comment") {
+        token = text.slice(commentStartPos, commentEndPos)
+        highlightedCode.push(styleCode(token, "text-gray-300")) 
+        commentType = ""
+        commentStartPos = commentEndPos = -1
+      }else if (prevTokenType === "string") {
         highlightedCode.push(styleCode(token, "text-green-300"))
       }else if ( !isNaN(token * 0) ) {
         highlightedCode.push(styleCode(token, "text-orange-300"))
@@ -97,36 +135,41 @@ function highlightCode(text: string) { // js only for now
   return highlightedCode
 }
 
-function LineOfCode({addNewLine, lineNo, focused, initCaretOffset, moveCaret} : 
-  {addNewLine: (num: number)=>void, lineNo: number, focused: boolean, initCaretOffset: number, moveCaret: (dir: string, num1: number, num2: number)=>void}) {
+/*
+if (prevTokenType === "hasNewLine") {
+    highlightedCode.push(styleCode(token, "text-zinc-200"))
+    lineCount++
+    highlightedCode.push(styleCode(lineCount.toString(), "text-gray-300", 'false'))
+  }else
+*/
+
+function CodeEditor({addNewLine, lineNo, focused} : {addNewLine: (num: number)=>void, lineNo: number, focused: boolean}) {
+  const [codeContent, setCodeContent] = useState<React.ReactNode[]>([])
+
   useEffect(() => {
     if (focused && preElement.current) {
       preElement.current.focus()
-      let textLength = preElement.current.textContent.length
-      let initSelection = window.getSelection()
-      const caretOffset = initCaretOffset > textLength ? textLength : initCaretOffset
-      for (let i=0; i<caretOffset; i++) {
-        initSelection.modify("move", "right", "character")
-      }
     }
-  }, [focused, initCaretOffset])
+  }, [focused])
   
   const preElement = useRef<HTMLPreElement>(null)
   const currentCaretOffset = useRef(-1)
  
-
   function reformatInput(event) {
     let insertedText = ""
-    if (event.type === "paste") {
-      insertedText = event.clipboardData.getData("text")
-    }else if (event.type === "keydown" && event.key === "Tab") {
-      insertedText = '\t'
+    if (event.type === "keydown") {
+      if (event.key === "Enter") {
+        insertedText = "\n"
+      }
     }else {
-      insertedText = event.data || ''
-    }
-    if (event.type !== "keyup") {
-      event.key !== 'Enter' && event.preventDefault();
-    }
+      event.preventDefault();
+      if (event.type === "paste") {
+        insertedText = event.clipboardData.getData("text")
+      }else if (event.type !== "keydown") {
+        insertedText = event.data
+      }
+    } 
+
     if (!preElement.current) { // this will never happen 
       return // typescript can rest now
     }
@@ -142,41 +185,24 @@ function LineOfCode({addNewLine, lineNo, focused, initCaretOffset, moveCaret} :
     preElement.current.innerHTML = ""
     preElement.current.append(...htmlTextList)
     let newCaretOffset = caretOffset + insertedText.length
-    currentCaretOffset.current = newCaretOffset
     for (let i=0; i<newCaretOffset; i++) {
       selection.modify("move", "right", "character")
     }  
   }
 
-  function gotoNextLine(event) {
-    if (event.key === "Tab") {
-      reformatInput(event)
-    }
-    // if (event.key === "ArrowUp") {
-    //   moveCaret("up", lineNo, currentCaretOffset.current)
-    // }
-    // if (event.key === "ArrowDown") {
-    //   moveCaret("down", lineNo, currentCaretOffset.current)
-    // }
-    // if (event.key === "Enter") {
-    //   event.preventDefault();
-    //   addNewLine(lineNo)
-    // }
-  }
-
-  function deleteText(event) {
+  function handleSpecialKeys(event) {
     if (event.key === "Backspace") {
+      reformatInput(event)
+    }else if (event.key === "Enter") {
       reformatInput(event)
     }
   }
 
   return (
     <div className="flex bg-sky-800">
-    <span className="text-gray-300 w-6 pl-2">{lineNo}</span>
-     <pre contentEditable spellCheck="false" onKeyUp={deleteText} onKeyDown={gotoNextLine} onBeforeInput={reformatInput} onPaste={reformatInput}
+     <pre contentEditable spellCheck="false" onKeyDown={handleSpecialKeys} onBeforeInput={reformatInput} onPaste={reformatInput}
      ref={preElement} className="text-white px-4 caret-amber-600 outline-none focus:bg-sky-900 flex-grow"></pre>
     </div>
-   
   )
 }
 
@@ -184,7 +210,7 @@ function LineOfCode({addNewLine, lineNo, focused, initCaretOffset, moveCaret} :
 export default function Editor() {
   const [linesKeys, setLinesKeys] = useState([1])
   const freeKeys = useRef<number[]>([])
-  const focusedLine = useRef({number: 0, caretOffset: 0})
+  const focusedLine = useRef(0)
 
   function addNewLine(num: number) {
     let newLineKeys = []
@@ -194,28 +220,15 @@ export default function Editor() {
     }else {
       newLineKeys = [...linesKeys.slice(0, num), freeKeys.current.pop() as number, ...linesKeys.slice(num, linesKeys.length)]
     }
-    focusedLine.current.number = num+1
+    focusedLine.current = num+1
     setLinesKeys(newLineKeys)
-  }
-
-  function moveCaretToNewLine(direction: string, lineNum: number, caretOffset: number):void {
-    if (direction === "up" && lineNum !== 1) {
-      focusedLine.current.number = lineNum-1
-      focusedLine.current.caretOffset = caretOffset
-      setLinesKeys([...linesKeys])
-    }else if (direction === "down" && lineNum !== linesKeys.length) {
-      focusedLine.current.number = lineNum+1
-      focusedLine.current.caretOffset = caretOffset
-      setLinesKeys([...linesKeys])
-    }
   }
 
   function generateLinesofCode() {
     const jsxList = Array(linesKeys.length)
     for (let i=0; i < linesKeys.length; i++) {
-      let isFocused = (focusedLine.current.number === i+1) 
-      jsxList[i] = <LineOfCode key={linesKeys[i]} lineNo={i+1} addNewLine={addNewLine} moveCaret={moveCaretToNewLine}
-                    focused={isFocused} initCaretOffset={focusedLine.current.caretOffset}/>
+      let isFocused = (focusedLine.current === i+1) 
+      jsxList[i] = <CodeEditor key={linesKeys[i]} lineNo={i+1} addNewLine={addNewLine} focused={isFocused}/>
     }
     return jsxList;
   }
