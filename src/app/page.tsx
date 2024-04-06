@@ -17,7 +17,6 @@ function styleCode(token: string, classStr: string) {
   let codeElement = document.createElement("code")
   codeElement.textContent = token
   codeElement.className = classStr
-  // codeElement.contentEditable = editable
   return codeElement;
 }
 
@@ -26,35 +25,62 @@ function styleCode(token: string, classStr: string) {
 // HTML, CSS
 // escape chars e.g \t, \n, template literals
 
+function tokenIsComment(token: string) : string {
+  let commentType = '';
+  if (token === lineComment) {
+    commentType = lineComment
+  }else if (token === multiLineComment) {
+    commentType = multiLineComment
+  }
+  return commentType
+}
+
+function tokenIsString() {
+
+}
+
+function tokenIsOthers() {
+
+}
+
 function highlightCode(text: string) { // js only for now
   let token = ""
   let openedQuotesType = "" // stores the type of opened quotes (' or ") if any is encountered during the loop
   let highlightedCode = []
   let prevTokenType = null
   let currentTokenType = null
-  let i = 0;
   let stringNotParsed = true
   let commentStartPos = -1
   let commentEndPos = -1
   let commentType = ""
-  let lineCount = 0
+  let i = 0;
 
   while (stringNotParsed) {
     let char = ( i < text.length ? text[i] : "")
 
-    if (token === lineComment || token === multiLineComment) {
-      commentType = token
-      if (commentStartPos < 0) commentStartPos = i - (commentType.length)
+    if (commentStartPos < 0 && !openedQuotesType) {
+      if (lineComment.includes(char) || multiLineComment.includes(char)) { // checks if character could be part of a comment token
+        if (!lineComment.includes(text[i-1]) && !multiLineComment.includes(text[i-1])) {
+          prevTokenType = currentTokenType // parse whatever token type found so far
+        }  
+      }
+      commentType = tokenIsComment(token) // change fn name to tokenHasComment
+      if (commentType) {
+        currentTokenType = 'comment'
+        commentStartPos = i - (commentType.length)
+      }
     }
 
     if (commentStartPos >= 0) {
       if (commentType === '//' && char === '\n') {
         commentEndPos = i
-        prevTokenType = "comment"
+        prevTokenType = currentTokenType
+        commentType = ""
       }else if (commentType === '/*' && token.endsWith('*/')) {
         commentEndPos = i
-        prevTokenType = "comment"
-      } 
+        prevTokenType = currentTokenType
+        commentType = ""
+      }
     }
 
     if (commentStartPos < 0 && (char === '"' || char === "'" || char === '`')) {
@@ -67,7 +93,7 @@ function highlightCode(text: string) { // js only for now
         prevTokenType = currentTokenType
         currentTokenType = "string"
       }
-    }else if (!openedQuotesType && char && commentStartPos < 0) {
+    }else if (!openedQuotesType && char && !commentType) {
       if (delimiters.includes(char)) {
         if (currentTokenType !== 'delimiter') {
           prevTokenType = currentTokenType
@@ -90,7 +116,6 @@ function highlightCode(text: string) { // js only for now
       }
       if (commentStartPos >= 0) {
         commentEndPos = i
-        prevTokenType = "comment"
       }
       stringNotParsed = false
     }
@@ -98,7 +123,7 @@ function highlightCode(text: string) { // js only for now
     if (prevTokenType) {
       if (prevTokenType === "comment") {
         token = text.slice(commentStartPos, commentEndPos)
-        highlightedCode.push(styleCode(token, "text-gray-300")) 
+        highlightedCode.push(styleCode(token, "text-gray-300"))
         commentType = ""
         commentStartPos = commentEndPos = -1
       }else if (prevTokenType === "string") {
@@ -142,20 +167,16 @@ function CodeEditor({addNewLine, lineNo, focused} : {addNewLine: (num: number)=>
   const preElement = useRef<HTMLPreElement>(null)
  
   function reformatInput(event) {
-    let newText = preElement.current.textContent
+    if (!preElement.current) { // this will never happen 
+      return // typescript can rest now
+    }
+    let newText = preElement.current.textContent as string
     let selection:any = window.getSelection()
     let range = selection.getRangeAt(0)
     range.setStart(preElement.current, 0)
     let caretOffset = range.toString().length
-    preElement.current.textContent = ""
-
-    if (!preElement.current) { // this will never happen 
-      return // typescript can rest now
-    }
-
-    let length = preElement.current.textContent.length
-    let htmlTextList = highlightCode(newText)
     preElement.current.innerHTML = ""
+    let htmlTextList = highlightCode(newText)
     preElement.current.append(...htmlTextList)
     for (let i=0; i<caretOffset; i++) {
       selection.modify("move", "right", "character")
