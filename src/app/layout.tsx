@@ -16,7 +16,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="bg-transparent">{children}</body>
+      <body className="bg-transparent">
+      {children}
+      </body>
     </html>
   )
 }

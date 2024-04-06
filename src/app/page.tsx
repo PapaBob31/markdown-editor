@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react"
 
 const operators = ["...", "in", '+', '?', '-', '/', '*', '^', '|', '&', '=', '<', '>']
-const delimiters = " .;,:(){}[]\n`"
+const delimiters = " .;,:(){}[]`\n"
 const numbers = "0123456789"
 const lineComment = "//"
 const multiLineComment = "/*"
@@ -37,7 +37,6 @@ function highlightCode(text: string) { // js only for now
   let commentStartPos = -1
   let commentEndPos = -1
   let commentType = ""
-  let newLine = false
   let lineCount = 0
 
   while (stringNotParsed) {
@@ -96,11 +95,6 @@ function highlightCode(text: string) { // js only for now
       stringNotParsed = false
     }
 
-    if (token.endsWith('\n')) {
-      prevTokenType = "hasNewLine"
-      currentTokenType = null
-    }
-
     if (prevTokenType) {
       if (prevTokenType === "comment") {
         token = text.slice(commentStartPos, commentEndPos)
@@ -109,7 +103,7 @@ function highlightCode(text: string) { // js only for now
         commentStartPos = commentEndPos = -1
       }else if (prevTokenType === "string") {
         highlightedCode.push(styleCode(token, "text-green-300"))
-      }else if ( !isNaN(token * 0) ) {
+      }else if ( !isNaN(token * 0) && prevTokenType === 'unknown' ) {
         highlightedCode.push(styleCode(token, "text-orange-300"))
       }else if (keywords.includes(token)) {
         highlightedCode.push(styleCode(token, "text-purple-400"))
@@ -135,13 +129,6 @@ function highlightCode(text: string) { // js only for now
   return highlightedCode
 }
 
-/*
-if (prevTokenType === "hasNewLine") {
-    highlightedCode.push(styleCode(token, "text-zinc-200"))
-    lineCount++
-    highlightedCode.push(styleCode(lineCount.toString(), "text-gray-300", 'false'))
-  }else
-*/
 
 function CodeEditor({addNewLine, lineNo, focused} : {addNewLine: (num: number)=>void, lineNo: number, focused: boolean}) {
   const [codeContent, setCodeContent] = useState<React.ReactNode[]>([])
@@ -153,55 +140,31 @@ function CodeEditor({addNewLine, lineNo, focused} : {addNewLine: (num: number)=>
   }, [focused])
   
   const preElement = useRef<HTMLPreElement>(null)
-  const currentCaretOffset = useRef(-1)
  
   function reformatInput(event) {
-    let insertedText = ""
-    if (event.type === "keydown") {
-      if (event.key === "Enter") {
-        insertedText = "\n"
-      }
-    }else {
-      event.preventDefault();
-      if (event.type === "paste") {
-        insertedText = event.clipboardData.getData("text")
-      }else if (event.type !== "keydown") {
-        insertedText = event.data
-      }
-    } 
-
-    if (!preElement.current) { // this will never happen 
-      return // typescript can rest now
-    }
+    let newText = preElement.current.textContent
     let selection:any = window.getSelection()
     let range = selection.getRangeAt(0)
     range.setStart(preElement.current, 0)
     let caretOffset = range.toString().length
+    preElement.current.textContent = ""
+
+    if (!preElement.current) { // this will never happen 
+      return // typescript can rest now
+    }
+
     let length = preElement.current.textContent.length
-    let newText = preElement.current.textContent.slice(0, caretOffset) + insertedText + preElement.current.textContent.slice(caretOffset, length)
-    
-    
     let htmlTextList = highlightCode(newText)
     preElement.current.innerHTML = ""
     preElement.current.append(...htmlTextList)
-    let newCaretOffset = caretOffset + insertedText.length
-    for (let i=0; i<newCaretOffset; i++) {
+    for (let i=0; i<caretOffset; i++) {
       selection.modify("move", "right", "character")
     }  
   }
 
-  function handleSpecialKeys(event) {
-    if (event.key === "Backspace") {
-      reformatInput(event)
-    }else if (event.key === "Enter") {
-      reformatInput(event)
-    }
-  }
-
   return (
     <div className="flex bg-sky-800">
-     <pre contentEditable spellCheck="false" onKeyDown={handleSpecialKeys} onBeforeInput={reformatInput} onPaste={reformatInput}
-     ref={preElement} className="text-white px-4 caret-amber-600 outline-none focus:bg-sky-900 flex-grow"></pre>
+     <pre contentEditable spellCheck="false" onInput={reformatInput} ref={preElement} className="text-white px-4 caret-amber-600 outline-none focus:bg-sky-900 flex-grow"></pre>
     </div>
   )
 }
