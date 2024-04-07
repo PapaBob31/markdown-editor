@@ -12,20 +12,11 @@ const keywords = [
   'await', 'void', 'return', 'if', 'else', 'for', 'class', "=>"
 ]
 const keywordsValues = ['true', 'false', 'null', 'undefined']
-
-function styleCode(token: string, classStr: string) {
-  let codeElement = document.createElement("code")
-  codeElement.textContent = token
-  codeElement.className = classStr
-  return codeElement;
-}
-
-
 // TODO:
 // HTML, CSS
 // escape chars e.g \t, \n, template literals
 
-function tokenIsComment(token: string) : string {
+function checkTokenStartsComment(token: string) : string {
   let commentType = '';
   if (token === lineComment) {
     commentType = lineComment
@@ -35,12 +26,65 @@ function tokenIsComment(token: string) : string {
   return commentType
 }
 
-function tokenIsString() {
-
+function charDelimitsStringOrComment(token: string, char: string, openedQuotes: string, commentType: string, currentTokenType: string) {
+  if (commentType === '//' && char === '\n') {
+    return currentTokenType
+  }else if (commentType === '/*' && token.endsWith('*/')) {
+    return currentTokenType
+  }else if (!commentType && (char === '"' || char === "'" || char === '`')) { // no  opened comments was found and opened string
+    if (openedQuotes){ 
+      if (openedQuotes === char) {
+        return currentTokenType
+      }
+    }else {
+      return char
+    }
+  }
+  return null
 }
 
-function tokenIsOthers() {
+function tokenIsOthers(char: string, currentTokenType: string) {
+  let prevTokenType = null
+  if (delimiters.includes(char)) {
+    if (currentTokenType !== 'delimiter') {
+      prevTokenType = currentTokenType
+      currentTokenType = 'delimiter'
+    }
+  }else if (operators.includes(char)) {
+    if (currentTokenType !== 'operator') {
+      prevTokenType = currentTokenType
+      currentTokenType = 'operator'
+    }
+  }else if (currentTokenType !== 'unknown') {
+    prevTokenType = currentTokenType
+    currentTokenType = 'unknown'
+  }
+  return [prevTokenType, currentTokenType]
+}
 
+function styleCode(token: string, classStr: string) {
+  let codeElement = document.createElement("code")
+  codeElement.textContent = token
+  codeElement.className = classStr
+  return codeElement;
+}
+
+function highlightedToken(prevTokenType:string, token:string) {
+  if (prevTokenType === "comment") {
+    return styleCode(token, "text-gray-300")
+  }else if (prevTokenType === "string") {
+    return styleCode(token, "text-green-300")
+  }else if ( !isNaN(token * 0) && prevTokenType === 'unknown' ) {
+    return styleCode(token, "text-orange-300")
+  }else if (keywords.includes(token)) {
+    return styleCode(token, "text-purple-400")
+  }else if (keywordsValues.includes(token)) {
+    return styleCode(token, "text-red-400")
+  }else if (prevTokenType === "operator" || operators.includes(token.trim())) {
+    return styleCode(token, "text-amber-500")
+  }else if (prevTokenType === "delimiter") {
+    return styleCode(token, "text-zinc-200")
+  }else return styleCode(token, "text-white")
 }
 
 function highlightCode(text: string) { // js only for now
@@ -50,101 +94,56 @@ function highlightCode(text: string) { // js only for now
   let prevTokenType = null
   let currentTokenType = null
   let stringNotParsed = true
-  let commentStartPos = -1
-  let commentEndPos = -1
   let commentType = ""
   let i = 0;
 
   while (stringNotParsed) {
     let char = ( i < text.length ? text[i] : "")
 
-    if (commentStartPos < 0 && !openedQuotesType) {
+    if (!commentType && !openedQuotesType) { // no opened comment and no opened string
       if (lineComment.includes(char) || multiLineComment.includes(char)) { // checks if character could be part of a comment token
         if (!lineComment.includes(text[i-1]) && !multiLineComment.includes(text[i-1])) {
           prevTokenType = currentTokenType // parse whatever token type found so far
         }  
       }
-      commentType = tokenIsComment(token) // change fn name to tokenHasComment
+      commentType = checkTokenStartsComment(token)
       if (commentType) {
         currentTokenType = 'comment'
-        commentStartPos = i - (commentType.length)
       }
     }
 
-    if (commentStartPos >= 0) {
-      if (commentType === '//' && char === '\n') {
-        commentEndPos = i
-        prevTokenType = currentTokenType
-        commentType = ""
-      }else if (commentType === '/*' && token.endsWith('*/')) {
-        commentEndPos = i
-        prevTokenType = currentTokenType
-        commentType = ""
-      }
-    }
-
-    if (commentStartPos < 0 && (char === '"' || char === "'" || char === '`')) {
-      if (openedQuotesType){ 
-        if (openedQuotesType === char) {
-          openedQuotesType = ''
-        }
-      }else {
+    let tokenType = charDelimitsStringOrComment(token, char, openedQuotesType, commentType, currentTokenType)
+    if (tokenType) {
+      prevTokenType = currentTokenType
+      openedQuotesType = ''
+      if (tokenType === char) {
         openedQuotesType = char
-        prevTokenType = currentTokenType
         currentTokenType = "string"
       }
-    }else if (!openedQuotesType && char && !commentType) {
-      if (delimiters.includes(char)) {
-        if (currentTokenType !== 'delimiter') {
-          prevTokenType = currentTokenType
-          currentTokenType = 'delimiter'
-        }
-      }else if (operators.includes(char)) {
-        if (currentTokenType !== 'operator') {
-          prevTokenType = currentTokenType
-          currentTokenType = 'operator'
-        }
-      }else if (currentTokenType !== 'unknown') {
-        prevTokenType = currentTokenType
-        currentTokenType = 'unknown'
-      }
+    }else if (!openedQuotesType && char && !commentType) { // no opened comment, not the last iteration and no opened string
+      [prevTokenType, currentTokenType] = tokenIsOthers(char, currentTokenType)
     }
 
-    if (i === text.length) {
+    if (i === text.length) { // last iteration
       if (currentTokenType) {
         prevTokenType = currentTokenType
-      }
-      if (commentStartPos >= 0) {
-        commentEndPos = i
       }
       stringNotParsed = false
     }
 
     if (prevTokenType) {
       if (prevTokenType === "comment") {
-        token = text.slice(commentStartPos, commentEndPos)
-        highlightedCode.push(styleCode(token, "text-gray-300"))
+        highlightedCode.push(highlightedToken(prevTokenType, token))
         commentType = ""
-        commentStartPos = commentEndPos = -1
-      }else if (prevTokenType === "string") {
-        highlightedCode.push(styleCode(token, "text-green-300"))
-      }else if ( !isNaN(token * 0) && prevTokenType === 'unknown' ) {
-        highlightedCode.push(styleCode(token, "text-orange-300"))
-      }else if (keywords.includes(token)) {
-        highlightedCode.push(styleCode(token, "text-purple-400"))
-      }else if (keywordsValues.includes(token)) {
-        highlightedCode.push(styleCode(token, "text-red-400"))
-      }else if (prevTokenType === "operator" || operators.includes(token.trim())) {
-        highlightedCode.push(styleCode(token, "text-amber-500"))
       }else if (prevTokenType === "delimiter") {
         if (token.trimStart()[0] === '(') {
           let lastIndex = highlightedCode.length - 1
-          if (highlightedCode[lastIndex].classList.contains("text-white")) {
+          if (highlightedCode.length && highlightedCode[lastIndex].classList.contains("text-white")) {
             highlightedCode[lastIndex].classList.replace("text-white", "text-sky-400")
           }
         }
-        highlightedCode.push(styleCode(token, "text-zinc-200"))
-      }else highlightedCode.push(styleCode(token, "text-white"))
+        highlightedCode.push(highlightedToken(prevTokenType, token))
+      }else highlightedCode.push(highlightedToken(prevTokenType, token)) 
       prevTokenType = null
       token = ""
     }
@@ -185,7 +184,8 @@ function CodeEditor({addNewLine, lineNo, focused} : {addNewLine: (num: number)=>
 
   return (
     <div className="flex bg-sky-800">
-     <pre contentEditable spellCheck="false" onInput={reformatInput} ref={preElement} className="text-white px-4 caret-amber-600 outline-none focus:bg-sky-900 flex-grow"></pre>
+     <pre contentEditable spellCheck="false" onInput={reformatInput} ref={preElement}
+      className="text-white px-4 caret-amber-600 outline-none focus:bg-sky-900 flex-grow"></pre>
     </div>
   )
 }
