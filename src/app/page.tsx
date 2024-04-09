@@ -2,17 +2,19 @@
 
 import { useEffect, useState, useRef } from "react"
 
-const operators = ["...", "in", '+', '?', '-', '/', '*', '^', '|', '&', '=', '<', '>']
-const delimiters = " .;,:(){}[]`\n"
+const operators = ["...", "in", '+', '!', '?', '%', '-', '/', '*', '^', '|', '&', '=', '<', '>']
+const delimiters = " .;,:(){}[]\n"
 const numbers = "0123456789"
 const lineComment = "//"
 const multiLineComment = "/*"
 const keywords = [
   'let', 'const', 'var', 'from', 'import', 'export', 'default', 'function', 'async', 
-  'await', 'void', 'return', 'if', 'else', 'for', 'class', "=>"
+  'await', 'void', 'return', 'if', 'else', 'for', 'class', "=>", "while"
 ]
 const keywordsValues = ['true', 'false', 'null', 'undefined']
+
 // TODO:
+// searh for all keywords and operators
 // HTML, CSS
 // escape chars e.g \t, \n, template literals
 
@@ -26,24 +28,31 @@ function checkTokenStartsComment(token: string) : string {
   return commentType
 }
 
-function charDelimitsStringOrComment(token: string, char: string, openedQuotes: string, commentType: string, currentTokenType: string) {
+
+function endOfComment(commentType: string, char: string, token: string) {
   if (commentType === '//' && char === '\n') {
-    return currentTokenType
+    return true
   }else if (commentType === '/*' && token.endsWith('*/')) {
-    return currentTokenType
-  }else if (!commentType && (char === '"' || char === "'" || char === '`')) { // no  opened comments was found and opened string
-    if (openedQuotes){ 
-      if (openedQuotes === char) {
-        return currentTokenType
-      }
-    }else {
-      return char
-    }
+    return true
   }
-  return null
+  return false
 }
 
-function tokenIsOthers(char: string, currentTokenType: string) {
+// Checks if a character could potentially start a comment that has multiple characters as it's delimiter
+function charCouldStartComment(i: number, text: string, char: string) {
+  if (lineComment[0] === char || multiLineComment[0] === char) {
+    if (i-1 >= 0 ) {
+      let charBefore = text[i-1]
+      if (!lineComment.includes(charBefore) && !multiLineComment.includes(charBefore)) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+
+function checkTokenType(char: string, currentTokenType: string) {
   let prevTokenType = null
   if (delimiters.includes(char)) {
     if (currentTokenType !== 'delimiter') {
@@ -64,17 +73,18 @@ function tokenIsOthers(char: string, currentTokenType: string) {
 
 function styleCode(token: string, classStr: string) {
   let codeElement = document.createElement("code")
-  codeElement.textContent = token
+  codeElement.innerText = token
   codeElement.className = classStr
   return codeElement;
 }
 
+
 function highlightedToken(prevTokenType:string, token:string) {
   if (prevTokenType === "comment") {
-    return styleCode(token, "text-gray-300")
+    return styleCode(token, "text-gray-400")
   }else if (prevTokenType === "string") {
     return styleCode(token, "text-green-300")
-  }else if ( !isNaN(token * 0) && prevTokenType === 'unknown' ) {
+  }else if ( !isNaN(token * 0) && prevTokenType === 'unknown' ) { // todo: improve string is number check
     return styleCode(token, "text-orange-300")
   }else if (keywords.includes(token)) {
     return styleCode(token, "text-purple-400")
@@ -95,33 +105,40 @@ function highlightCode(text: string) { // js only for now
   let currentTokenType = null
   let stringNotParsed = true
   let commentType = ""
+  let lineNum = 1
   let i = 0;
 
   while (stringNotParsed) {
     let char = ( i < text.length ? text[i] : "")
 
-    if (!commentType && !openedQuotesType) { // no opened comment and no opened string
-      if (lineComment.includes(char) || multiLineComment.includes(char)) { // checks if character could be part of a comment token
-        if (!lineComment.includes(text[i-1]) && !multiLineComment.includes(text[i-1])) {
-          prevTokenType = currentTokenType // parse whatever token type found so far
-        }  
-      }
-      commentType = checkTokenStartsComment(token)
-      if (commentType) {
-        currentTokenType = 'comment'
-      }
-    }
+    if (char === '\n'){
+      // console.log(i, char === '\n')
+      lineNum++
+    } 
 
-    let tokenType = charDelimitsStringOrComment(token, char, openedQuotesType, commentType, currentTokenType)
-    if (tokenType) {
-      prevTokenType = currentTokenType
-      openedQuotesType = ''
-      if (tokenType === char) {
+    if (!commentType && !openedQuotesType) {
+      if (char === '"' || char === "'" || char === '`') {
         openedQuotesType = char
+        prevTokenType = currentTokenType
         currentTokenType = "string"
+      }else if (charCouldStartComment(i, text, char)) {
+        prevTokenType = currentTokenType
+      }else {
+        commentType = checkTokenStartsComment(token)
+        if (commentType) {
+          currentTokenType = 'comment'
+        }
       }
-    }else if (!openedQuotesType && char && !commentType) { // no opened comment, not the last iteration and no opened string
-      [prevTokenType, currentTokenType] = tokenIsOthers(char, currentTokenType)
+      if (char && !commentType && !openedQuotesType){
+        [prevTokenType, currentTokenType] = checkTokenType(char, currentTokenType)
+      }
+    }else if (commentType) {
+      if (endOfComment(commentType, char, token)) {
+        prevTokenType = currentTokenType
+      }
+    }else if (char && (openedQuotesType === char || char === '\n')) {
+      openedQuotesType = ''
+      currentTokenType = "string"
     }
 
     if (i === text.length) { // last iteration
@@ -150,76 +167,68 @@ function highlightCode(text: string) { // js only for now
     token += char
     i++
   }
-  return highlightedCode
+  return [highlightedCode, lineNum]
 }
 
 
-function CodeEditor({addNewLine, lineNo, focused} : {addNewLine: (num: number)=>void, lineNo: number, focused: boolean}) {
-  const [codeContent, setCodeContent] = useState<React.ReactNode[]>([])
+function Number({number}:{number: string}) {
+  return <div className="text-gray-400 text-right">{number}</div>
+}
 
-  useEffect(() => {
-    if (focused && preElement.current) {
-      preElement.current.focus()
-    }
-  }, [focused])
+export default function CodeEditor() {
+  const [numberOfLines, setNumberOfLines] = useState(1)
   
   const preElement = useRef<HTMLPreElement>(null)
- 
-  function reformatInput(event) {
+
+  function reformatInput(event: React.SyntheticEvent) {
     if (!preElement.current) { // this will never happen 
       return // typescript can rest now
     }
-    let newText = preElement.current.textContent as string
+    let newText = preElement.current.innerText as string
     let selection:any = window.getSelection()
     let range = selection.getRangeAt(0)
     range.setStart(preElement.current, 0)
-    let caretOffset = range.toString().length
+    selection.addRange(range)
+
+    /* strip all '\r' out cause Firefox adds it along with '\n' in a selection on Windows. Chrome and probably other webkit browsers 
+    dont't, idk. I haven't checked. However this increases the length of the selection by 1 making caretOffset to increase by 1 too.
+    This is bad cause the '\r\n' combo will be rendered as '\n' I think. This sha fixes the caretOffset bug. DON'T TOUCH!*/
+    let caretOffset = selection.toString().replaceAll("\r", "").length
+
+    /* If the enter key is pressed at any caret position in a contentEditable element, 
+    chrome adds double '\n' characters at that position when you get it's innerText if it's adjacent characters are '\n' characters too,
+    the code below strips such redundant '\n' characters out as they would becomne a problem later on*/
+    let textAfterCaret = newText.slice(caretOffset, newText.length)
+    if (textAfterCaret.length > 1 && ('\n\n\n\n\n\n\n').includes(textAfterCaret)) {
+      newText = newText.slice(0, newText.length-1)
+    }
+
+    selection.collapseToEnd()
+    range.collapse()
     preElement.current.innerHTML = ""
-    let htmlTextList = highlightCode(newText)
+    let [htmlTextList, updatedNumber] = highlightCode(newText)
+    // setNumberOfLines(updatedNumber)
     preElement.current.append(...htmlTextList)
     for (let i=0; i<caretOffset; i++) {
       selection.modify("move", "right", "character")
-    }  
+    }
+  }
+
+
+  function generateNumForLines() {
+    const numbersJSX = []
+    for (let i=0; i<numberOfLines; i++) {
+      numbersJSX.push(<Number key={i} number={(i+1).toString()}/>)
+    }
+    return numbersJSX
   }
 
   return (
     <div className="flex bg-sky-800">
+    {/*<div className="text-gray-200 px-2">{generateNumForLines()}</div>*/}
      <pre contentEditable spellCheck="false" onInput={reformatInput} ref={preElement}
-      className="text-white px-4 caret-amber-600 outline-none focus:bg-sky-900 flex-grow"></pre>
+      className="whitespace-pre-wrap block text-white pl-2 caret-amber-600 outline-none bg-sky-900 flex-grow">
+      </pre>
     </div>
-  )
-}
-
-
-export default function Editor() {
-  const [linesKeys, setLinesKeys] = useState([1])
-  const freeKeys = useRef<number[]>([])
-  const focusedLine = useRef(0)
-
-  function addNewLine(num: number) {
-    let newLineKeys = []
-    if (freeKeys.current.length === 0) {
-      let len = linesKeys.length
-      newLineKeys = [...linesKeys.slice(0, num), linesKeys[len-1]+1, ...linesKeys.slice(num, linesKeys.length)]
-    }else {
-      newLineKeys = [...linesKeys.slice(0, num), freeKeys.current.pop() as number, ...linesKeys.slice(num, linesKeys.length)]
-    }
-    focusedLine.current = num+1
-    setLinesKeys(newLineKeys)
-  }
-
-  function generateLinesofCode() {
-    const jsxList = Array(linesKeys.length)
-    for (let i=0; i < linesKeys.length; i++) {
-      let isFocused = (focusedLine.current === i+1) 
-      jsxList[i] = <CodeEditor key={linesKeys[i]} lineNo={i+1} addNewLine={addNewLine} focused={isFocused}/>
-    }
-    return jsxList;
-  }
-
-  return (
-    <section>
-      {generateLinesofCode()}
-    </section>
   )
 }
