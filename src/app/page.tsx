@@ -2,8 +2,8 @@
 
 import { useEffect, useState, useRef } from "react"
 
-const operators = ["...", "in", '+', '!', '?', '%', '-', '/', '*', '^', '|', '&', '=', '<', '>']
-const delimiters = " .;,:(){}[]\n"
+const operators = ["...", "in", "new", '+', '!', '?', '%', '-', '/', '*', '^', '|', '&', '=', '<', '>']
+const delimiters = " .;,(){}[]\n"
 const numbers = "0123456789"
 const lineComment = "//"
 const multiLineComment = "/*"
@@ -27,7 +27,6 @@ function checkTokenStartsComment(token: string) : string {
   }
   return commentType
 }
-
 
 function endOfComment(commentType: string, char: string, token: string) {
   if (commentType === '//' && char === '\n') {
@@ -81,7 +80,7 @@ function styleCode(token: string, classStr: string) {
 
 function highlightedToken(prevTokenType:string, token:string) {
   if (prevTokenType === "comment") {
-    return styleCode(token, "text-gray-400")
+    return styleCode(token, "text-gray-300")
   }else if (prevTokenType === "string") {
     return styleCode(token, "text-green-300")
   }else if ( !isNaN(token * 0) && prevTokenType === 'unknown' ) { // todo: improve string is number check
@@ -171,49 +170,36 @@ function highlightCode(text: string) { // js only for now
 }
 
 
+function getCurrentCaretPosition(focusedElement) {
+  let selection = window.getSelection()
+  let range = selection.getRangeAt(0)
+  range.setStart(focusedElement, 0)
+  selection.addRange(range)
+  let caretOffset = selection.toString().replaceAll("\r","").length
+  selection.collapseToEnd()
+  range.collapse()
+  return caretOffset
+}
+
+function generateStyledHTML(text: string, parentElement, caretOffset: number) {
+  let selection = window.getSelection()
+  let [htmlTextList, updatedNumber] = highlightCode(text)
+  parentElement.innerHTML = ""
+  parentElement.append(...htmlTextList)
+  for (let i=0; i<caretOffset; i++) {
+    selection.modify("move", "right", "character")
+  }
+  return updatedNumber
+}
+
 function Number({number}:{number: string}) {
   return <div className="text-gray-400 text-right">{number}</div>
 }
 
 export default function CodeEditor() {
   const [numberOfLines, setNumberOfLines] = useState(1)
-  
+  const localValue = useRef("")
   const preElement = useRef<HTMLPreElement>(null)
-
-  function reformatInput(event: React.SyntheticEvent) {
-    if (!preElement.current) { // this will never happen 
-      return // typescript can rest now
-    }
-    let newText = preElement.current.innerText as string
-    let selection:any = window.getSelection()
-    let range = selection.getRangeAt(0)
-    range.setStart(preElement.current, 0)
-    selection.addRange(range)
-
-    /* strip all '\r' out cause Firefox adds it along with '\n' in a selection on Windows. Chrome and probably other webkit browsers 
-    dont't, idk. I haven't checked. However this increases the length of the selection by 1 making caretOffset to increase by 1 too.
-    This is bad cause the '\r\n' combo will be rendered as '\n' I think. This sha fixes the caretOffset bug. DON'T TOUCH!*/
-    let caretOffset = selection.toString().replaceAll("\r", "").length
-
-    /* If the enter key is pressed at any caret position in a contentEditable element, 
-    chrome adds double '\n' characters at that position when you get it's innerText if it's adjacent characters are '\n' characters too,
-    the code below strips such redundant '\n' characters out as they would becomne a problem later on*/
-    let textAfterCaret = newText.slice(caretOffset, newText.length)
-    if (textAfterCaret.length > 1 && ('\n\n\n\n\n\n\n').includes(textAfterCaret)) {
-      newText = newText.slice(0, newText.length-1)
-    }
-
-    selection.collapseToEnd()
-    range.collapse()
-    preElement.current.innerHTML = ""
-    let [htmlTextList, updatedNumber] = highlightCode(newText)
-    // setNumberOfLines(updatedNumber)
-    preElement.current.append(...htmlTextList)
-    for (let i=0; i<caretOffset; i++) {
-      selection.modify("move", "right", "character")
-    }
-  }
-
 
   function generateNumForLines() {
     const numbersJSX = []
@@ -223,10 +209,41 @@ export default function CodeEditor() {
     return numbersJSX
   }
 
+  function interceptEnterKey(event: React.KeyboardEvent){
+    if (event.key === "Enter") {
+      event.preventDefault()
+      let caretOffset = getCurrentCaretPosition(event.target)
+      if (localValue.current === "") {
+        localValue.current = '\n\n'
+      }else {
+        localValue.current = localValue.current.slice(0, caretOffset) + "\n" + localValue.current.slice(caretOffset, localValue.current.length)
+      }
+      caretOffset++
+      if (caretOffset === localValue.current.length) {
+        localValue.current += "\n"
+      }
+      let newText = localValue.current
+      let number = generateStyledHTML(newText,  preElement.current, caretOffset)
+      setNumberOfLines(number-1)
+    }
+  }
+
+  function reStyleCode(event) {
+    let caretOffset = getCurrentCaretPosition(event.target)
+    let inputLen = event.target.innerText.length
+    if (event.target.innerText[inputLen-1] === "\n") {
+      localValue.current = event.target.innerText.slice(0, inputLen)
+    }else {
+      localValue.current = event.target.innerText
+    }
+    let number = generateStyledHTML(localValue.current, preElement.current, caretOffset)
+    setNumberOfLines(number-1)
+  }
+
   return (
     <div className="flex bg-sky-800">
-    {/*<div className="text-gray-200 px-2">{generateNumForLines()}</div>*/}
-     <pre contentEditable spellCheck="false" onInput={reformatInput} ref={preElement}
+    <div className="text-gray-200 px-2">{generateNumForLines()}</div>
+     <pre contentEditable spellCheck="false" onInput={reStyleCode} ref={preElement} onKeyDown={interceptEnterKey}
       className="whitespace-pre-wrap block text-white pl-2 caret-amber-600 outline-none bg-sky-900 flex-grow">
       </pre>
     </div>
