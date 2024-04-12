@@ -79,7 +79,9 @@ function styleCode(token: string, classStr: string) {
 
 
 function highlightedToken(prevTokenType:string, token:string) {
-  if (prevTokenType === "comment") {
+  if (prevTokenType === "function") {
+    return styleCode(token, "text-sky-400")
+  }else if (prevTokenType === "comment") {
     return styleCode(token, "text-gray-300")
   }else if (prevTokenType === "string") {
     return styleCode(token, "text-green-300")
@@ -106,12 +108,12 @@ function highlightCode(text: string) { // js only for now
   let commentType = ""
   let lineNum = 1
   let i = 0;
+  let unIdentifiedTokens: string[] = []
 
   while (stringNotParsed) {
     let char = ( i < text.length ? text[i] : "")
 
     if (char === '\n'){
-      // console.log(i, char === '\n')
       lineNum++
     } 
 
@@ -148,18 +150,19 @@ function highlightCode(text: string) { // js only for now
     }
 
     if (prevTokenType) {
+      if (unIdentifiedTokens.length > 0 && token.trimStart()[0] === '(') {
+        highlightedCode.push(highlightedToken("function", unIdentifiedTokens.pop()))
+      }else if (unIdentifiedTokens.length > 0){
+        highlightedCode.push(highlightedToken("unknown", unIdentifiedTokens.pop()))
+      }
       if (prevTokenType === "comment") {
         highlightedCode.push(highlightedToken(prevTokenType, token))
         commentType = ""
       }else if (prevTokenType === "delimiter") {
-        if (token.trimStart()[0] === '(') {
-          let lastIndex = highlightedCode.length - 1
-          if (highlightedCode.length && highlightedCode[lastIndex].classList.contains("text-white")) {
-            highlightedCode[lastIndex].classList.replace("text-white", "text-sky-400")
-          }
-        }
         highlightedCode.push(highlightedToken(prevTokenType, token))
-      }else highlightedCode.push(highlightedToken(prevTokenType, token)) 
+      }else if (prevTokenType === currentTokenType) {
+        highlightedCode.push(highlightedToken(prevTokenType, token))
+      }else unIdentifiedTokens.push(token)
       prevTokenType = null
       token = ""
     }
@@ -214,8 +217,11 @@ export default function CodeEditor() {
       event.preventDefault()
       let caretOffset = getCurrentCaretPosition(event.target)
       if (localValue.current === "") {
+        /*I don't use innertext because different browsers implement different behaviours with innerText. 
+        getting innerText after Enter Key press on empty contentEditable Element return '\n\n\n' in chrome but '\n\n' in firefox*/
         localValue.current = '\n\n'
       }else {
+        // Again, This is done cause of different browser behaviour concerning innerText when new line is encountered
         localValue.current = localValue.current.slice(0, caretOffset) + "\n" + localValue.current.slice(caretOffset, localValue.current.length)
       }
       caretOffset++
@@ -232,6 +238,8 @@ export default function CodeEditor() {
     let caretOffset = getCurrentCaretPosition(event.target)
     let inputLen = event.target.innerText.length
     if (event.target.innerText[inputLen-1] === "\n") {
+      // some browsers [chrome] append unneeded newline char to their innerText attribute.
+      // This leads to the display of a newline that wasn't there before reformating
       localValue.current = event.target.innerText.slice(0, inputLen)
     }else {
       localValue.current = event.target.innerText
