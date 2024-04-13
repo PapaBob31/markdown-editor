@@ -1,9 +1,9 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
+import React, { useEffect, useState, useRef } from "react"
 
 const operators = ["...", "in", "new", '+', '!', '?', '%', '-', '/', '*', '^', '|', '&', '=', '<', '>']
-const delimiters = " .;,(){}[]\n"
+const delimiters = " .;,(){}[]\n\t"
 const numbers = "0123456789"
 const lineComment = "//"
 const multiLineComment = "/*"
@@ -18,14 +18,13 @@ const keywordsValues = ['true', 'false', 'null', 'undefined']
 // HTML, CSS
 // escape chars e.g \t, \n, template literals
 
-function checkTokenStartsComment(token: string) : string {
-  let commentType = '';
-  if (token === lineComment) {
-    commentType = lineComment
-  }else if (token === multiLineComment) {
-    commentType = multiLineComment
+function checkForComment(text: string, index: number) {
+  if (text.startsWith(lineComment, index)) {
+    return lineComment
+  }else if (text.startsWith(multiLineComment, index))  {
+    return multiLineComment
   }
-  return commentType
+  return ""
 }
 
 function endOfComment(commentType: string, char: string, token: string) {
@@ -37,22 +36,9 @@ function endOfComment(commentType: string, char: string, token: string) {
   return false
 }
 
-// Checks if a character could potentially start a comment that has multiple characters as it's delimiter
-function charCouldStartComment(i: number, text: string, char: string) {
-  if (lineComment[0] === char || multiLineComment[0] === char) {
-    if (i-1 >= 0 ) {
-      let charBefore = text[i-1]
-      if (!lineComment.includes(charBefore) && !multiLineComment.includes(charBefore)) {
-        return true
-      }
-    }
-  }
-  return false
-}
-
-
 function checkTokenType(char: string, currentTokenType: string) {
   let prevTokenType = null
+
   if (delimiters.includes(char)) {
     if (currentTokenType !== 'delimiter') {
       prevTokenType = currentTokenType
@@ -79,18 +65,18 @@ function styleCode(token: string, classStr: string) {
 
 
 function highlightedToken(prevTokenType:string, token:string) {
-  if (prevTokenType === "function") {
-    return styleCode(token, "text-sky-400")
-  }else if (prevTokenType === "comment") {
+  if (prevTokenType === "comment") {
     return styleCode(token, "text-gray-300")
   }else if (prevTokenType === "string") {
     return styleCode(token, "text-green-300")
-  }else if ( !isNaN(token * 0) && prevTokenType === 'unknown' ) { // todo: improve string is number check
+  }else if (prevTokenType === "escapeChar") {
+    return styleCode(token, "text-purple-300")
+  }else if ( !isNaN(token * 0) && prevTokenType === 'unknown' ) { // todo: improve string is number check [2\\3 won't get parsed]
     return styleCode(token, "text-orange-300")
   }else if (keywords.includes(token)) {
     return styleCode(token, "text-purple-400")
   }else if (keywordsValues.includes(token)) {
-    return styleCode(token, "text-red-400")
+    return styleCode(token,"text-red-400" )
   }else if (prevTokenType === "operator" || operators.includes(token.trim())) {
     return styleCode(token, "text-amber-500")
   }else if (prevTokenType === "delimiter") {
@@ -98,71 +84,77 @@ function highlightedToken(prevTokenType:string, token:string) {
   }else return styleCode(token, "text-white")
 }
 
-function highlightCode(text: string) { // js only for now
+function highlightCode(text: string) : [HTMLElement[], number] { // js only for now
   let token = ""
   let openedQuotesType = "" // stores the type of opened quotes (' or ") if any is encountered during the loop
-  let highlightedCode = []
+  let highlightedCode: HTMLElement[] = []
   let prevTokenType = null
   let currentTokenType = null
   let stringNotParsed = true
   let commentType = ""
   let lineNum = 1
   let i = 0;
-  let unIdentifiedTokens: string[] = []
+  let escChar = false
 
   while (stringNotParsed) {
     let char = ( i < text.length ? text[i] : "")
 
     if (char === '\n'){
       lineNum++
-    } 
+    }
 
-    if (!commentType && !openedQuotesType) {
-      if (char === '"' || char === "'" || char === '`') {
+    if (!openedQuotesType && !commentType) {
+      if(char === '"' || char === "'" || char === "`") {
         openedQuotesType = char
         prevTokenType = currentTokenType
         currentTokenType = "string"
-      }else if (charCouldStartComment(i, text, char)) {
-        prevTokenType = currentTokenType
       }else {
-        commentType = checkTokenStartsComment(token)
+        commentType = checkForComment(text, i)
         if (commentType) {
-          currentTokenType = 'comment'
+          prevTokenType = currentTokenType
+          currentTokenType = "comment"
         }
       }
-      if (char && !commentType && !openedQuotesType){
-        [prevTokenType, currentTokenType] = checkTokenType(char, currentTokenType)
+      if (!commentType && !openedQuotesType) {
+        if (char){
+          [prevTokenType, currentTokenType] = checkTokenType(char, currentTokenType as string)
+        }
       }
-    }else if (commentType) {
-      if (endOfComment(commentType, char, token)) {
+    }else if (openedQuotesType) {
+      if (!escChar && openedQuotesType === char) {
+        openedQuotesType = ''
+      }
+      if (escChar && token.length === 2) {
         prevTokenType = currentTokenType
+        currentTokenType = "string"
+        escChar = false
+      }else if (char === '\\') {
+        currentTokenType = "escapeChar"
+        escChar = true
       }
-    }else if (char && (openedQuotesType === char || char === '\n')) {
-      openedQuotesType = ''
-      currentTokenType = "string"
+    }else if (endOfComment(commentType, char, token)) {
+      prevTokenType = currentTokenType
+      currentTokenType = null
     }
-
+    
     if (i === text.length) { // last iteration
       if (currentTokenType) {
         prevTokenType = currentTokenType
       }
       stringNotParsed = false
     }
-
+    
     if (prevTokenType) {
-      if (unIdentifiedTokens.length > 0 && token.trimStart()[0] === '(') {
-        highlightedCode.push(highlightedToken("function", unIdentifiedTokens.pop()))
-      }else if (unIdentifiedTokens.length > 0){
-        highlightedCode.push(highlightedToken("unknown", unIdentifiedTokens.pop()))
-      }
       if (prevTokenType === "comment") {
         highlightedCode.push(highlightedToken(prevTokenType, token))
         commentType = ""
       }else if (prevTokenType === "delimiter") {
+        let lti = highlightedCode.length - 1 // lastTokenIndex
+        if (token.trimStart()[0] === "(" && highlightedCode[lti].classList.contains("text-white")) {
+          highlightedCode[lti].classList.replace("text-white", "text-sky-400")
+        }
         highlightedCode.push(highlightedToken(prevTokenType, token))
-      }else if (prevTokenType === currentTokenType) {
-        highlightedCode.push(highlightedToken(prevTokenType, token))
-      }else unIdentifiedTokens.push(token)
+      }else highlightedCode.push(highlightedToken(prevTokenType, token))
       prevTokenType = null
       token = ""
     }
@@ -173,8 +165,8 @@ function highlightCode(text: string) { // js only for now
 }
 
 
-function getCurrentCaretPosition(focusedElement) {
-  let selection = window.getSelection()
+function getCurrentCaretPosition(focusedElement: HTMLElement) {
+  let selection = window.getSelection() as any
   let range = selection.getRangeAt(0)
   range.setStart(focusedElement, 0)
   selection.addRange(range)
@@ -184,15 +176,14 @@ function getCurrentCaretPosition(focusedElement) {
   return caretOffset
 }
 
-function generateStyledHTML(text: string, parentElement, caretOffset: number) {
+function moveCaretToNewPosition(newCaretOffset: number) {
   let selection = window.getSelection()
-  let [htmlTextList, updatedNumber] = highlightCode(text)
-  parentElement.innerHTML = ""
-  parentElement.append(...htmlTextList)
-  for (let i=0; i<caretOffset; i++) {
+  if (!selection) {
+    return 
+  }
+  for (let i=0; i<newCaretOffset; i++) {
     selection.modify("move", "right", "character")
   }
-  return updatedNumber
 }
 
 function Number({number}:{number: string}) {
@@ -215,7 +206,7 @@ export default function CodeEditor() {
   function interceptEnterKey(event: React.KeyboardEvent){
     if (event.key === "Enter") {
       event.preventDefault()
-      let caretOffset = getCurrentCaretPosition(event.target)
+      let caretOffset = getCurrentCaretPosition(event.target as HTMLElement)
       if (localValue.current === "") {
         /*I don't use innertext because different browsers implement different behaviours with innerText. 
         getting innerText after Enter Key press on empty contentEditable Element return '\n\n\n' in chrome but '\n\n' in firefox*/
@@ -228,9 +219,11 @@ export default function CodeEditor() {
       if (caretOffset === localValue.current.length) {
         localValue.current += "\n"
       }
-      let newText = localValue.current
-      let number = generateStyledHTML(newText,  preElement.current, caretOffset)
-      setNumberOfLines(number-1)
+      let [htmlTextList, updatedNumber] = highlightCode(localValue.current)
+      event.target.innerHTML = ""
+      event.target.append(...htmlTextList)
+      setNumberOfLines(updatedNumber-1)
+      moveCaretToNewPosition(caretOffset)
     }
   }
 
@@ -244,16 +237,20 @@ export default function CodeEditor() {
     }else {
       localValue.current = event.target.innerText
     }
-    let number = generateStyledHTML(localValue.current, preElement.current, caretOffset)
-    setNumberOfLines(number-1)
+    let [htmlTextList, updatedNumber] = highlightCode(localValue.current)
+    event.target.innerHTML = ""
+    event.target.append(...htmlTextList)
+    setNumberOfLines(updatedNumber-1)
+    moveCaretToNewPosition(caretOffset)
   }
 
   return (
     <div className="flex bg-sky-800">
     <div className="text-gray-200 px-2">{generateNumForLines()}</div>
+     {/*pre element's content isn't stored in state because Component's with `contentEditable` can't contain `children` managed by React*/} 
      <pre contentEditable spellCheck="false" onInput={reStyleCode} ref={preElement} onKeyDown={interceptEnterKey}
       className="whitespace-pre-wrap block text-white pl-2 caret-amber-600 outline-none bg-sky-900 flex-grow">
-      </pre>
+     </pre>
     </div>
   )
 }
