@@ -6,7 +6,8 @@ const operators = ["...", "in", "new", '+', '!', '?', '%', '-', '/', '*', '^', '
 const delimiters = " .;,(){}[]\n\t"
 const numbers = "0123456789"
 const lineComment = "//"
-const multiLineComment = "/*"
+const multiLineCommentStart = "/*"
+const multiLineCommentEnd = "*/"
 const keywords = [
   'let', 'const', 'var', 'from', 'import', 'export', 'default', 'function', 'async', 
   'await', 'void', 'return', 'if', 'else', 'for', 'class', "=>", "while"
@@ -14,15 +15,15 @@ const keywords = [
 const keywordsValues = ['true', 'false', 'null', 'undefined']
 
 // TODO:
-// searh for all keywords and operators
+// search for all keywords and operators
 // HTML, CSS
 // escape chars e.g \t, \n, template literals
 
 function checkForComment(text: string, index: number) {
   if (text.startsWith(lineComment, index)) {
     return lineComment
-  }else if (text.startsWith(multiLineComment, index))  {
-    return multiLineComment
+  }else if (text.startsWith(multiLineCommentStart, index))  {
+    return multiLineCommentStart
   }
   return ""
 }
@@ -30,7 +31,7 @@ function checkForComment(text: string, index: number) {
 function endOfComment(commentType: string, char: string, token: string) {
   if (commentType === '//' && char === '\n') {
     return true
-  }else if (commentType === '/*' && token.endsWith('*/')) {
+  }else if (commentType === multiLineCommentStart && token.endsWith(multiLineCommentEnd)) {
     return true
   }
   return false
@@ -69,8 +70,6 @@ function highlightedToken(prevTokenType:string, token:string) {
     return styleCode(token, "text-gray-300")
   }else if (prevTokenType === "string") {
     return styleCode(token, "text-green-300")
-  }else if (prevTokenType === "escapeChar") {
-    return styleCode(token, "text-purple-300")
   }else if ( !isNaN(token * 0) && prevTokenType === 'unknown' ) { // todo: improve string is number check [2\\3 won't get parsed]
     return styleCode(token, "text-orange-300")
   }else if (keywords.includes(token)) {
@@ -94,13 +93,27 @@ function highlightCode(text: string) : [HTMLElement[], number] { // js only for 
   let commentType = ""
   let lineNum = 1
   let i = 0;
-  let escChar = false
 
   while (stringNotParsed) {
     let char = ( i < text.length ? text[i] : "")
 
-    if (char === '\n'){
+    if (char === '\n' && i !== text.length-1){ // there's usually a redundant new line at the end of text
       lineNum++
+    }
+
+    if (endOfComment(commentType, char, token)) {
+      prevTokenType = currentTokenType
+      commentType = ""
+    }else {
+      if (token.length > 1 && openedQuotesType === token[token.length-1]){
+        openedQuotesType = ''
+        prevTokenType = currentTokenType
+      }
+
+      if (char === '\n' && (openedQuotesType === '"' || openedQuotesType === "'")) {
+        openedQuotesType = ''
+        prevTokenType = currentTokenType
+      }
     }
 
     if (!openedQuotesType && !commentType) {
@@ -120,21 +133,6 @@ function highlightCode(text: string) : [HTMLElement[], number] { // js only for 
           [prevTokenType, currentTokenType] = checkTokenType(char, currentTokenType as string)
         }
       }
-    }else if (openedQuotesType) {
-      if (!escChar && openedQuotesType === char) {
-        openedQuotesType = ''
-      }
-      if (escChar && token.length === 2) {
-        prevTokenType = currentTokenType
-        currentTokenType = "string"
-        escChar = false
-      }else if (char === '\\') {
-        currentTokenType = "escapeChar"
-        escChar = true
-      }
-    }else if (endOfComment(commentType, char, token)) {
-      prevTokenType = currentTokenType
-      currentTokenType = null
     }
     
     if (i === text.length) { // last iteration
@@ -147,7 +145,6 @@ function highlightCode(text: string) : [HTMLElement[], number] { // js only for 
     if (prevTokenType) {
       if (prevTokenType === "comment") {
         highlightedCode.push(highlightedToken(prevTokenType, token))
-        commentType = ""
       }else if (prevTokenType === "delimiter") {
         let lti = highlightedCode.length - 1 // lastTokenIndex
         if (token.trimStart()[0] === "(" && highlightedCode[lti].classList.contains("text-white")) {
@@ -222,7 +219,7 @@ export default function CodeEditor() {
       let [htmlTextList, updatedNumber] = highlightCode(localValue.current)
       event.target.innerHTML = ""
       event.target.append(...htmlTextList)
-      setNumberOfLines(updatedNumber-1)
+      setNumberOfLines(updatedNumber)
       moveCaretToNewPosition(caretOffset)
     }
   }
@@ -240,7 +237,7 @@ export default function CodeEditor() {
     let [htmlTextList, updatedNumber] = highlightCode(localValue.current)
     event.target.innerHTML = ""
     event.target.append(...htmlTextList)
-    setNumberOfLines(updatedNumber-1)
+    setNumberOfLines(updatedNumber)
     moveCaretToNewPosition(caretOffset)
   }
 
