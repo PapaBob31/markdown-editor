@@ -18,7 +18,7 @@ const keywordsValues = ['true', 'false', 'null', 'undefined']
 // TODO:
 // search for all keywords and operators
 // HTML, CSS
-// escape chars e.g \t, \n, template literals
+// Tab key press as well as tab representation
 
 // checks if a String has a comment starting at a given index in the string
 function checkForComment(text: string, index: number) {
@@ -106,7 +106,6 @@ function highlightCode(text: string, newCaretOffset: number) : any { // js only 
   let commentType = ""
   let lineNum = 1
   let i = 0;
-  let foundCaretElement = false
   let caretOffset = 0
   let caretElement = null
 
@@ -171,7 +170,6 @@ function highlightCode(text: string, newCaretOffset: number) : any { // js only 
       if (i >= newCaretOffset && !caretElement) {
         caretElement = highlightedCode[lti+1]
         caretOffset = caretElement.innerText.length - (i - newCaretOffset)
-        // console.log(caretElement.innerText.length, i, newCaretOffset)
       }
       prevTokenType = null
       token = ""
@@ -179,6 +177,107 @@ function highlightCode(text: string, newCaretOffset: number) : any { // js only 
     token += char
     i++
   }
+  return [highlightedCode, lineNum, caretElement, caretOffset]
+}
+
+
+function highlightMarkDown(text: string, newCaretOffset: number) : any {
+  let token = "";
+  let currentTokenType = "";
+  let prevTokenType = "";
+  let linkArray: string[] = [];
+  let beginningOfLine = true
+  let stringNotProcessed = true
+  let linkComponent = ""
+  let highlightedCode = [];
+  let i = 0;
+  let caretOffset = 0;
+  let caretElement = null;
+
+  while (stringNotProcessed) {
+    let char = ( i < text.length ? text[i] : "")
+
+    if (beginningOfLine) {
+      if (("-+*#= ").includes(char)) {
+        if (currentTokenType !== "block elements") {
+          prevTokenType = currentTokenType
+          currentTokenType = 'block elements'
+        }
+      }else {
+        beginningOfLine = false;
+        if (token.length >= 1 && token[token.length-1] !== " ") {
+          if ((/\s*\**|_*\B/).test(token)) {
+            currentTokenType = "emphasis"
+          }
+        }
+        prevTokenType = currentTokenType
+      }
+    }else {
+      let li = linkArray.length - 1
+      if (linkArray.length === 0) {
+        if ((char === "*" || char === "_") && currentTokenType !== "emphasis") {
+          prevTokenType = currentTokenType
+          currentTokenType = "emphasis"
+        }else if (char === "!" || char === "[") {
+          prevTokenType = currentTokenType
+          currentTokenType = "link components"
+          linkArray.push(char)
+        }else if (currentTokenType !== "text") {
+          prevTokenType = currentTokenType
+          currentTokenType = "text"
+        }
+      }else {
+        let li = linkArray.length - 1
+        if (linkArray.length == 1 && char == '[') {
+          linkArray[li] === "!" && (linkArray[li] += char)
+        }else if (char === ']') {
+          linkArray.push(char) 
+          prevTokenType = currentTokenType
+        }else if ((/\*_/).test(linkArray[li])) {
+          if (char === "*" || char === "_") {
+            linkArray.push(char)
+          }else linkArray[li] += char
+        }else linkArray.push(char)
+      }
+    }
+    if (i === text.length) { // last iteration
+      if (currentTokenType) {
+        prevTokenType = currentTokenType
+      }
+      stringNotProcessed = false
+    }
+    
+    if (prevTokenType) {
+      let lti = highlightedCode.length - 1 // lastTokenIndex
+      if (prevTokenType === "block elements") {
+        highlightedCode.push(styleCode(token, "text-amber-500"))
+      }else if (prevTokenType === "emphasis") {
+        highlightedCode.push(styleCode(token, "text-purple-400"))
+      }else if (prevTokenType === "text") {
+        highlightedCode.push(styleCode(token, "text-white"))
+      }else if (prevTokenType === "link components") {
+        currentTokenType = 'text' // na that last iteration check i been dey avoid
+        linkArray.forEach(component => {
+          if ((/\*_/).test(component)) {
+            highlightedCode.push(styleCode(token, "text-purple-400"))
+          }else if (['[', '![', ']'].includes(component)) {
+            highlightedCode.push(styleCode(token, "text-sky-500"))
+          }else {
+            highlightedCode.push(styleCode(token, "text-white"))
+          }
+        })
+      }
+      if (i >= newCaretOffset && !caretElement) {
+        caretElement = highlightedCode[lti+1]
+        caretOffset = caretElement.innerText.length - (i - newCaretOffset)
+      }
+      prevTokenType = ""
+      token = ""
+    }
+    token += char
+    i++
+  }
+  let lineNum = 1
   return [highlightedCode, lineNum, caretElement, caretOffset]
 }
 
@@ -215,10 +314,10 @@ export default function CodeEditor() {
       if (caretOffset === localValue.current.length) {
         localValue.current += "\n"
       }
-      let [htmlTextList, updatedNumber, caretElement, newCaretOffset] = highlightCode(localValue.current, caretOffset)
+      let [htmlTextList, updatedNumber, caretElement, newCaretOffset] = highlightMarkDown(localValue.current, caretOffset)
       event.target.innerHTML = ""
       event.target.append(...htmlTextList)
-      setNumberOfLines(updatedNumber)
+      // setNumberOfLines(updatedNumber)
       moveCaretToNewPosition(newCaretOffset, caretElement.firstChild)
     }
   }
@@ -233,17 +332,16 @@ export default function CodeEditor() {
     }else {
       localValue.current = event.target.innerText
     }
-    let [htmlTextList, updatedNumber, caretElement, newCaretOffset] = highlightCode(localValue.current, caretOffset)
+    let [htmlTextList, updatedNumber, caretElement, newCaretOffset] = highlightMarkDown(localValue.current, caretOffset)
     event.target.innerHTML = ""
     event.target.append(...htmlTextList)
-    setNumberOfLines(updatedNumber)
-    console.log([newCaretOffset])
+    // setNumberOfLines(updatedNumber)
     moveCaretToNewPosition(newCaretOffset, caretElement.firstChild)
   }
 
   return (
     <div className="flex bg-slate-700">
-    <div className="text-gray-200 px-2 leading-tight">{generateNumForLines()}</div>
+    {/*<div className="text-gray-200 px-2 leading-tight">{generateNumForLines()}</div>*/}
      {/*pre element's content isn't stored in state because Component's with `contentEditable` can't contain `children` managed by React*/} 
      <pre contentEditable spellCheck="false" onInput={reStyleCode} ref={preElement} onKeyDown={interceptEnterKey}
       className="block leading-tight text-white pl-2 caret-amber-600 outline-none flex-grow">
