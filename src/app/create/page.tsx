@@ -197,27 +197,30 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
   while (stringNotProcessed) {
     let char = ( i < text.length ? text[i] : "")
 
-    if (beginningOfLine) {
+    if (beginningOfLine && char) {
       if (("-+*#= ").includes(char)) {
         if (currentTokenType !== "block elements") {
           prevTokenType = currentTokenType
           currentTokenType = 'block elements'
         }
-      }else {
+      }else if (char !== "\n") {
         beginningOfLine = false;
         if (token.length >= 1 && token[token.length-1] !== " ") {
-          if ((/\s*\**|_*\B/).test(token)) {
+          if ((/\s*\*+|_+\B/).test(token)) {
             currentTokenType = "emphasis"
           }
         }
-        prevTokenType = currentTokenType
       }
-    }else {
+    }
+
+    if (!beginningOfLine && char) {
       let li = linkArray.length - 1
       if (linkArray.length === 0) {
-        if ((char === "*" || char === "_") && currentTokenType !== "emphasis") {
-          prevTokenType = currentTokenType
-          currentTokenType = "emphasis"
+        if (char === "*" || char === "_") {
+          if (currentTokenType !== "emphasis") {
+            prevTokenType = currentTokenType
+            currentTokenType = "emphasis"
+          } 
         }else if (char === "!" || char === "[") {
           prevTokenType = currentTokenType
           currentTokenType = "link components"
@@ -246,6 +249,10 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       }
       stringNotProcessed = false
     }
+
+    if (char === '\n' && i !== text.length-1) {
+      beginningOfLine = true
+    }
     
     if (prevTokenType) {
       let lti = highlightedCode.length - 1 // lastTokenIndex
@@ -257,15 +264,18 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
         highlightedCode.push(styleCode(token, "text-white"))
       }else if (prevTokenType === "link components") {
         currentTokenType = 'text' // na that last iteration check i been dey avoid
-        linkArray.forEach(component => {
+        linkArray.forEach((component, index) => {
           if ((/\*_/).test(component)) {
-            highlightedCode.push(styleCode(token, "text-purple-400"))
-          }else if (['[', '![', ']'].includes(component)) {
-            highlightedCode.push(styleCode(token, "text-sky-500"))
+            highlightedCode.push(styleCode(component, "text-purple-400"))
+          }if ((component === '[' || component === '![') && index == 0) {
+            highlightedCode.push(styleCode(component, "text-sky-500"))
+          }else if (component === ']' && index == linkArray.length-1) {
+            highlightedCode.push(styleCode(component, "text-sky-500"))
           }else {
-            highlightedCode.push(styleCode(token, "text-white"))
+            highlightedCode.push(styleCode(component, "text-white"))
           }
         })
+        linkArray = []
       }
       if (i >= newCaretOffset && !caretElement) {
         caretElement = highlightedCode[lti+1]
@@ -274,11 +284,14 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       prevTokenType = ""
       token = ""
     }
-    token += char
+    if (linkArray.length === 0) {
+      token += char
+    } 
     i++
   }
   let lineNum = 1
-  return [highlightedCode, lineNum, caretElement, caretOffset]
+  return [highlightedCode, lineNum, highlightedCode[0], 0]
+  // return [highlightedCode, lineNum, caretElement, caretOffset]
 }
 
 function Number({number}:{number: string}) {
