@@ -180,16 +180,15 @@ function highlightCode(text: string, newCaretOffset: number) : any { // js only 
   return [highlightedCode, lineNum, caretElement, caretOffset]
 }
 
-
+// TODO 1. syntax for ordered list
 function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let token = "";
   let currentTokenType = "";
   let prevTokenType = "";
-  let linkArray: string[] = [];
   let beginningOfLine = true
   let stringNotProcessed = true
-  let linkComponent = ""
   let highlightedCode = [];
+  let openedBrackets = false;
   let i = 0;
   let caretOffset = 0;
   let caretElement = null;
@@ -198,7 +197,7 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
     let char = ( i < text.length ? text[i] : "")
 
     if (beginningOfLine && char) {
-      if (("-+*#= ").includes(char)) {
+      if (("-+*#>= ").includes(char)) {
         if (currentTokenType !== "block elements") {
           prevTokenType = currentTokenType
           currentTokenType = 'block elements'
@@ -214,33 +213,39 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
     }
 
     if (!beginningOfLine && char) {
-      let li = linkArray.length - 1
-      if (linkArray.length === 0) {
+      if (text[i-1] === '\\') {
+
+      }else if (char === '[' && !openedBrackets) {
+        if (text[i-1] === '!') {
+          token = token.slice(0, token.length-1)
+          char = '!' + char;
+        }
+        openedBrackets = true;
+        prevTokenType = currentTokenType
+        currentTokenType = "link-text-delimiter"
+      }else if (char === ']' && openedBrackets) {
+        openedBrackets = false
+        prevTokenType = currentTokenType
+        currentTokenType = "link-text-delimiter"
+      }else {
         if (char === "*" || char === "_") {
           if (currentTokenType !== "emphasis") {
-            prevTokenType = currentTokenType
-            currentTokenType = "emphasis"
-          } 
-        }else if (char === "!" || char === "[") {
-          prevTokenType = currentTokenType
-          currentTokenType = "link components"
-          linkArray.push(char)
-        }else if (currentTokenType !== "text") {
-          prevTokenType = currentTokenType
-          currentTokenType = "text"
+            prevTokenType = currentTokenType;
+            currentTokenType = "emphasis";
+          }
+        }else if (char === '(' && currentTokenType === "link-text-delimiter") {
+          prevTokenType = currentTokenType;
+          currentTokenType = "link-delimiter-start";
+        }else if (char === ')' && (currentTokenType === "link-delimiter-start" || currentTokenType === "link")) {
+          prevTokenType = currentTokenType;
+          currentTokenType = "link-delimiter-end";
+        }else if (currentTokenType === "link-delimiter-start") {
+          prevTokenType = currentTokenType;
+          currentTokenType = "link";
+        }else if (currentTokenType !== "link"){
+          prevTokenType = currentTokenType;
+          currentTokenType = "text";
         }
-      }else {
-        let li = linkArray.length - 1
-        if (linkArray.length == 1 && char == '[') {
-          linkArray[li] === "!" && (linkArray[li] += char)
-        }else if (char === ']') {
-          linkArray.push(char) 
-          prevTokenType = currentTokenType
-        }else if ((/\*_/).test(linkArray[li])) {
-          if (char === "*" || char === "_") {
-            linkArray.push(char)
-          }else linkArray[li] += char
-        }else linkArray.push(char)
       }
     }
     if (i === text.length) { // last iteration
@@ -262,20 +267,12 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
         highlightedCode.push(styleCode(token, "text-purple-400"))
       }else if (prevTokenType === "text") {
         highlightedCode.push(styleCode(token, "text-white"))
-      }else if (prevTokenType === "link components") {
-        currentTokenType = 'text' // na that last iteration check i been dey avoid
-        linkArray.forEach((component, index) => {
-          if ((/\*_/).test(component)) {
-            highlightedCode.push(styleCode(component, "text-purple-400"))
-          }if ((component === '[' || component === '![') && index == 0) {
-            highlightedCode.push(styleCode(component, "text-sky-500"))
-          }else if (component === ']' && index == linkArray.length-1) {
-            highlightedCode.push(styleCode(component, "text-sky-500"))
-          }else {
-            highlightedCode.push(styleCode(component, "text-white"))
-          }
-        })
-        linkArray = []
+      }else if (prevTokenType === "link-text-delimiter") {
+        highlightedCode.push(styleCode(token, "text-cyan-400"))
+      }else if (prevTokenType.startsWith("link-delimiter-")) {
+        highlightedCode.push(styleCode(token, "text-cyan-400"))
+      }else if (prevTokenType === "link") {
+        highlightedCode.push(styleCode(token, "text-sky-500 underline"))
       }
       if (i >= newCaretOffset && !caretElement) {
         caretElement = highlightedCode[lti+1]
@@ -284,14 +281,11 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       prevTokenType = ""
       token = ""
     }
-    if (linkArray.length === 0) {
-      token += char
-    } 
+    token += char 
     i++
   }
   let lineNum = 1
-  return [highlightedCode, lineNum, highlightedCode[0], 0]
-  // return [highlightedCode, lineNum, caretElement, caretOffset]
+  return [highlightedCode, lineNum, caretElement, caretOffset]
 }
 
 function Number({number}:{number: string}) {
