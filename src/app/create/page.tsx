@@ -181,6 +181,7 @@ function highlightCode(text: string, newCaretOffset: number) : any { // js only 
 }
 
 // TODO 1. syntax for ordered list
+// fix caret is null error
 function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let token = "";
   let currentTokenType = "";
@@ -189,6 +190,7 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let stringNotProcessed = true
   let highlightedCode = [];
   let openedBrackets = false;
+  let openedLinkText = true;
   let i = 0;
   let caretOffset = 0;
   let caretElement = null;
@@ -197,17 +199,23 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
     let char = ( i < text.length ? text[i] : "")
 
     if (beginningOfLine && char) {
-      if (("-+*#>= ").includes(char)) {
+      if (("-+*#>=").includes(char)) {
         if (currentTokenType !== "block elements") {
           prevTokenType = currentTokenType
-          currentTokenType = 'block elements'
+          currentTokenType = "block elements"
         }
+      }else if (("123456789.").includes(char)) {
+        if (currentTokenType !== "unknown") {
+          prevTokenType = currentTokenType
+          currentTokenType = "unknown"
+        }
+      }else if (char === " " || char === "\n") {
+        prevTokenType = currentTokenType
+        currentTokenType = "text"
       }else if (char !== "\n") {
         beginningOfLine = false;
-        if (token.length >= 1 && token[token.length-1] !== " ") {
-          if ((/\s*\*+|_+\B/).test(token)) {
-            currentTokenType = "emphasis"
-          }
+        if ((/\s*\*+|_+\B/).test(token)) {
+          currentTokenType = "emphasis"
         }
       }
     }
@@ -228,7 +236,7 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
         prevTokenType = currentTokenType
         currentTokenType = "link-text-delimiter"
       }else {
-        if (char === "*" || char === "_") {
+        if ((char === "*" || char === "_") && !openedLinkText) {
           if (currentTokenType !== "emphasis") {
             prevTokenType = currentTokenType;
             currentTokenType = "emphasis";
@@ -236,10 +244,12 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
         }else if (char === '(' && currentTokenType === "link-text-delimiter") {
           prevTokenType = currentTokenType;
           currentTokenType = "link-delimiter-start";
-        }else if (char === ')' && (currentTokenType === "link-delimiter-start" || currentTokenType === "link")) {
+          openedLinkText = true;
+        }else if (char === ')' && openedLinkText) {
           prevTokenType = currentTokenType;
           currentTokenType = "link-delimiter-end";
-        }else if (currentTokenType === "link-delimiter-start") {
+          openedLinkText = false;
+        }else if (currentTokenType === "link-delimiter-start" && openedLinkText) {
           prevTokenType = currentTokenType;
           currentTokenType = "link";
         }else if (currentTokenType !== "link"){
@@ -255,24 +265,26 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       stringNotProcessed = false
     }
 
-    if (char === '\n' && i !== text.length-1) {
+    if (char === '\n' && i !== text.length-1 && !openedLinkText) {
       beginningOfLine = true
     }
     
     if (prevTokenType) {
       let lti = highlightedCode.length - 1 // lastTokenIndex
-      if (prevTokenType === "block elements") {
+      if (prevTokenType === "unknown" && (/\d+\.{1}/).test(token)) {
+        highlightedCode.push(styleCode(token, "text-amber-300"))
+      }else if (prevTokenType === "block elements") {
         highlightedCode.push(styleCode(token, "text-amber-500"))
       }else if (prevTokenType === "emphasis") {
         highlightedCode.push(styleCode(token, "text-purple-400"))
-      }else if (prevTokenType === "text") {
-        highlightedCode.push(styleCode(token, "text-white"))
       }else if (prevTokenType === "link-text-delimiter") {
         highlightedCode.push(styleCode(token, "text-cyan-400"))
       }else if (prevTokenType.startsWith("link-delimiter-")) {
         highlightedCode.push(styleCode(token, "text-cyan-400"))
       }else if (prevTokenType === "link") {
         highlightedCode.push(styleCode(token, "text-sky-500 underline"))
+      }else {
+        highlightedCode.push(styleCode(token, "text-white"))
       }
       if (i >= newCaretOffset && !caretElement) {
         caretElement = highlightedCode[lti+1]
