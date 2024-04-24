@@ -38,7 +38,7 @@ function checkForComment(text: string, index: number) {
 function endOfComment(commentType: string, char: string, token: string) {
   if (commentType === lineComment && char === '\n') {
     return true
-  }else if (commentType === multiLineCommentStart && token.endsWith(multiLineCommentEnd)) {
+  }else if (commentType === multiLineCommentStart && token.endsWith(multiLineCommentEnd)) { // optimise endsWith?
     return true
   }
   return false
@@ -190,10 +190,52 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let stringNotProcessed = true
   let highlightedCode = [];
   let openedBrackets = false;
-  let openedLinkText = true;
+  let openedLinkText = false;
+  let openedCodeDelimiter = false;
   let i = 0;
   let caretOffset = 0;
   let caretElement = null;
+  const tokenArray: string[] = [];
+  let newToken = false
+  let blockBodiesStart = []
+
+
+/*
+```heuheuh```
+<tag>neuheuh</tag>
+[link text](link)
+**emphasis/strong**
+_strong_
+\ escape them all
+\\ escape itself
+
+*/
+
+/* GENERAL PARSING ALGO NOW. EXPLOIT THE PATTERN
+
+? WHAT IF THEY DON'T CLOSE THEIR TAGS, NONE OF MY GODDAMN BUSINESS
+ - SIMPLICITY IS KEY
+
+- WHAT CAN'T YOU NEST?
+  - SQUARE BRACKETS INSIDE SQUARE BRACKETS
+  - ANY TAG INSIDE CODE BLOCKS NOT EVEN CODE BLOCKS
+  - TAGS CAN'T BE NESTED INSIDE LINK ADDRESS
+
+- SOME RULES
+  - '\n' COULD BE A DELIMITER DEPENDING ON THE SITUATION
+  - '(' MUST BE PRECEEDED BY A '[' BEFORE IT GETS HIHLIGHTED
+  - \ IS A SPECIAL CHARACTER
+  - SPACE CHARACTER IS ALSO A DELIMITER ONLY AT THE BEGINING OF A LINE
+ 
+- CODE ELEMENT
+  - DO NORMAL FOR INLINE CODE
+  - MULTILINE SHOULD CAUSE A BRANCH IN THE ALGORITHM INTO CODE HIGHLIGHTING FUNCTION
+    - RETURN CARETOFFSET AND CARETELEMENT IF POSSIBLE
+
+
+*/
+
+
 
   while (stringNotProcessed) {
     let char = ( i < text.length ? text[i] : "")
@@ -201,100 +243,98 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
     if (beginningOfLine && char) {
       if (("-+*#>=").includes(char)) {
         if (currentTokenType !== "block elements") {
-          prevTokenType = currentTokenType
-          currentTokenType = "block elements"
-        }
-      }else if (("123456789.").includes(char)) {
-        if (currentTokenType !== "unknown") {
-          prevTokenType = currentTokenType
-          currentTokenType = "unknown"
+          currentTokenType = "block elements";
+          newToken = true;
         }
       }else if (char === " " || char === "\n") {
-        prevTokenType = currentTokenType
-        currentTokenType = "text"
+        if (currentTokenType !== "beginning of line delimiters") {
+          currentTokenType = "beginning of line delimiters"
+          newToken = true;
+        }
       }else if (char !== "\n") {
         beginningOfLine = false;
-        if ((/\s*\*+|_+\B/).test(token)) {
-          currentTokenType = "emphasis"
-        }
+        blockBodiesStart.push(token)
       }
     }
 
-    if (!beginningOfLine && char) {
-      if (text[i-1] === '\\') {
+    let previousChar = i-1 > 0 ? text[i-1] : "";
 
-      }else if (char === '[' && !openedBrackets) {
-        if (text[i-1] === '!') {
-          token = token.slice(0, token.length-1)
-          char = '!' + char;
-        }
-        openedBrackets = true;
-        prevTokenType = currentTokenType
-        currentTokenType = "link-text-delimiter"
-      }else if (char === ']' && openedBrackets) {
-        openedBrackets = false
-        prevTokenType = currentTokenType
-        currentTokenType = "link-text-delimiter"
-      }else {
-        if ((char === "*" || char === "_") && !openedLinkText) {
-          if (currentTokenType !== "emphasis") {
-            prevTokenType = currentTokenType;
-            currentTokenType = "emphasis";
+    if (previousChar !== '\\' ) {
+      if (char === '[') {
+        if (!openedBrackets) {
+          if (previousChar === "!") {
+            token = token.slice(0, token.length-1)
+            char = '!['
           }
-        }else if (char === '(' && currentTokenType === "link-text-delimiter") {
-          prevTokenType = currentTokenType;
-          currentTokenType = "link-delimiter-start";
-          openedLinkText = true;
-        }else if (char === ')' && openedLinkText) {
-          prevTokenType = currentTokenType;
-          currentTokenType = "link-delimiter-end";
-          openedLinkText = false;
-        }else if (currentTokenType === "link-delimiter-start" && openedLinkText) {
-          prevTokenType = currentTokenType;
-          currentTokenType = "link";
-        }else if (currentTokenType !== "link"){
-          prevTokenType = currentTokenType;
-          currentTokenType = "text";
+          newToken = true;
         }
+      }else if (char === ']' && openedBrackets) {
+        newToken = true;
+        openedBrackets = false;
+      }else if (char === "(" && token === '[') {
+        newToken = true;
+        currentTokenType = "link address"
+      }else if (char === ')' && currentTokenType === "link address") {
+        newToken = true;
+      }else if (char === "*" || char === "_") {
+        if (!("*_").includes(previousChar)) {
+          newToken = true;
+        }
+      }else if (currentTokenType != "text") {
+        newToken = true;
+        currentTokenType = "text"
       }
-    }
-    if (i === text.length) { // last iteration
-      if (currentTokenType) {
-        prevTokenType = currentTokenType
-      }
-      stringNotProcessed = false
     }
 
     if (char === '\n' && i !== text.length-1 && !openedLinkText) {
       beginningOfLine = true
     }
-    
-    if (prevTokenType) {
-      let lti = highlightedCode.length - 1 // lastTokenIndex
-      if (prevTokenType === "unknown" && (/\d+\.{1}/).test(token)) {
-        highlightedCode.push(styleCode(token, "text-amber-300"))
-      }else if (prevTokenType === "block elements") {
-        highlightedCode.push(styleCode(token, "text-amber-500"))
-      }else if (prevTokenType === "emphasis") {
-        highlightedCode.push(styleCode(token, "text-purple-400"))
-      }else if (prevTokenType === "link-text-delimiter") {
-        highlightedCode.push(styleCode(token, "text-cyan-400"))
-      }else if (prevTokenType.startsWith("link-delimiter-")) {
-        highlightedCode.push(styleCode(token, "text-cyan-400"))
-      }else if (prevTokenType === "link") {
-        highlightedCode.push(styleCode(token, "text-sky-500 underline"))
-      }else {
-        highlightedCode.push(styleCode(token, "text-white"))
-      }
-      if (i >= newCaretOffset && !caretElement) {
-        caretElement = highlightedCode[lti+1]
-        caretOffset = caretElement.innerText.length - (i - newCaretOffset)
-      }
-      prevTokenType = ""
+
+    if (i === text.length) { // last iteration
+      newToken = true;
+      stringNotProcessed = false;
+    }
+
+    if (newToken && token) {
+      tokenArray.push(token)
+      newToken = false;
       token = ""
     }
     token += char 
     i++
+  }
+  let newLine = true;
+  let cummulativeStrLen = 0;
+
+
+// don't know how to check the  end of beginning of a line
+  for (let i=0; i<tokenArray.length; i++) {
+    if (newLine) {
+      if (tokenArray[i] === blockBodiesStart.shift()) {
+        newLine = false;
+      }
+      if ((/^\d+\b\.$/).test(tokenArray[i])) {
+        highlightedCode.push(styleCode(tokenArray[i], "text-amber-300"))
+      }else {
+        highlightedCode.push(styleCode(tokenArray[i], "text-amber-500"))
+      }
+    }else {
+      if (tokenArray[i] === '![' || tokenArray[i] === "[" || tokenArray[i] === "(" || tokenArray[i] === ")") {
+        highlightedCode.push(styleCode(tokenArray[i], "text-cyan-400"))
+      }else if (tokenArray[i].includes("*") || tokenArray[i].includes("_")) {
+        highlightedCode.push(styleCode(tokenArray[i], "text-purple-400"))
+      }else if (i-1 >= 0 && tokenArray[i-1] === "(") {
+        highlightedCode.push(styleCode(tokenArray[i], "text-sky-500 underline"))
+      }else {
+        highlightedCode.push(styleCode(tokenArray[i], "text-white"))
+      }
+    }
+    let lti = highlightedCode.length-1
+    cummulativeStrLen += tokenArray[i].length
+    if (cummulativeStrLen >= newCaretOffset && !caretElement) {
+      caretElement = highlightedCode[lti]
+      caretOffset = caretElement.innerText.length - (cummulativeStrLen - newCaretOffset)
+    }
   }
   let lineNum = 1
   return [highlightedCode, lineNum, caretElement, caretOffset]

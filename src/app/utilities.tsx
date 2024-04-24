@@ -9,7 +9,7 @@ export function getCurrentCaretPosition(focusedElement: HTMLElement) {
   return caretOffset
 }
 
-export function moveCaretToNewPosition(newCaretOffset: number, textNode) {
+export function moveCaretToNewPosition(newCaretOffset: number, textNode: HTMLElement) {
   let selection = window.getSelection()
   if (!selection) {
     return
