@@ -180,113 +180,88 @@ function highlightCode(text: string, newCaretOffset: number) : any { // js only 
   return [highlightedCode, lineNum, caretElement, caretOffset]
 }
 
-// TODO 1. syntax for ordered list
-// fix caret is null error
 function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let token = "";
-  let currentTokenType = "";
-  let prevTokenType = "";
   let beginningOfLine = true
   let stringNotProcessed = true
   let highlightedCode = [];
   let openedBrackets = false;
-  let openedLinkText = false;
-  let openedCodeDelimiter = false;
   let i = 0;
   let caretOffset = 0;
   let caretElement = null;
   const tokenArray: string[] = [];
   let newToken = false
-  let blockBodiesStart = []
-
-
-/*
-```heuheuh```
-<tag>neuheuh</tag>
-[link text](link)
-**emphasis/strong**
-_strong_
-\ escape them all
-\\ escape itself
-
-*/
-
-/* GENERAL PARSING ALGO NOW. EXPLOIT THE PATTERN
-
-? WHAT IF THEY DON'T CLOSE THEIR TAGS, NONE OF MY GODDAMN BUSINESS
- - SIMPLICITY IS KEY
-
-- WHAT CAN'T YOU NEST?
-  - SQUARE BRACKETS INSIDE SQUARE BRACKETS
-  - ANY TAG INSIDE CODE BLOCKS NOT EVEN CODE BLOCKS
-  - TAGS CAN'T BE NESTED INSIDE LINK ADDRESS
-
-- SOME RULES
-  - '\n' COULD BE A DELIMITER DEPENDING ON THE SITUATION
-  - '(' MUST BE PRECEEDED BY A '[' BEFORE IT GETS HIHLIGHTED
-  - \ IS A SPECIAL CHARACTER
-  - SPACE CHARACTER IS ALSO A DELIMITER ONLY AT THE BEGINING OF A LINE
- 
-- CODE ELEMENT
-  - DO NORMAL FOR INLINE CODE
-  - MULTILINE SHOULD CAUSE A BRANCH IN THE ALGORITHM INTO CODE HIGHLIGHTING FUNCTION
-    - RETURN CARETOFFSET AND CARETELEMENT IF POSSIBLE
-
-
-*/
-
+  let linkAddressToken = false;
+  let plainTextToken = true;
 
 
   while (stringNotProcessed) {
     let char = ( i < text.length ? text[i] : "")
 
     if (beginningOfLine && char) {
-      if (("-+*#>=").includes(char)) {
-        if (currentTokenType !== "block elements") {
-          currentTokenType = "block elements";
+      if (("-+#>=").includes(char)) {
+        if (token && !("-+#>=").includes(token[0])) {
+          newToken = true;
+        }
+      }else if (("0123456789.").includes(char)){
+        if (token && !(/\d+|\./).test(token[0])) {
+          newToken = true;
+        }
+      }else if (char === '*' || char === '_') {
+        if (token && (token[0] !== '*' && token[0] !== '_')) {
           newToken = true;
         }
       }else if (char === " " || char === "\n") {
-        if (currentTokenType !== "beginning of line delimiters") {
-          currentTokenType = "beginning of line delimiters"
+        if (token && (token[0] !== " " && token[0] !== '\n')) {
           newToken = true;
         }
       }else if (char !== "\n") {
         beginningOfLine = false;
-        blockBodiesStart.push(token)
       }
     }
 
-    let previousChar = i-1 > 0 ? text[i-1] : "";
+    let previousChar = i-1 >= 0 ? text[i-1] : "";
 
-    if (previousChar !== '\\' ) {
-      if (char === '[') {
-        if (!openedBrackets) {
-          if (previousChar === "!") {
-            token = token.slice(0, token.length-1)
-            char = '!['
-          }
-          newToken = true;
+    if (!beginningOfLine && previousChar !== '\\' && !linkAddressToken) {
+      if (char === '[' && !openedBrackets) {
+        if (previousChar === "!") {
+          token = token.slice(0, token.length-1)
+          char = '!['
         }
+        openedBrackets = true;
+        newToken = true;
+        plainTextToken = false;
       }else if (char === ']' && openedBrackets) {
         newToken = true;
         openedBrackets = false;
-      }else if (char === "(" && token === '[') {
+        plainTextToken = false;
+      }else if (char === "(" && token === ']') {
         newToken = true;
-        currentTokenType = "link address"
-      }else if (char === ')' && currentTokenType === "link address") {
-        newToken = true;
+        linkAddressToken = true;
+        plainTextToken = false;
       }else if (char === "*" || char === "_") {
-        if (!("*_").includes(previousChar)) {
+        plainTextToken = false;
+        if (previousChar !== "_" && previousChar !== '*') {
           newToken = true;
         }
-      }else if (currentTokenType != "text") {
+      }else if (char === '\n') {
+        if (token && token[0] !== '\n') {
+          newToken = true;
+        }
+      }else if (!plainTextToken) {
+        plainTextToken = true;
         newToken = true;
-        currentTokenType = "text"
+      }
+    }else {
+      if (linkAddressToken && token === '('){
+        newToken = true;
+      }else if (char === ')' && linkAddressToken) {
+        linkAddressToken = false;
+        newToken = true;
       }
     }
 
-    if (char === '\n' && i !== text.length-1 && !openedLinkText) {
+    if (char === '\n' && i !== text.length-1 && !linkAddressToken) {
       beginningOfLine = true
     }
 
@@ -297,7 +272,7 @@ _strong_
 
     if (newToken && token) {
       tokenArray.push(token)
-      newToken = false;
+      newToken = false; 
       token = ""
     }
     token += char 
@@ -305,27 +280,41 @@ _strong_
   }
   let newLine = true;
   let cummulativeStrLen = 0;
+  let characterMatchs : string[] = []
 
-
-// don't know how to check the  end of beginning of a line
   for (let i=0; i<tokenArray.length; i++) {
     if (newLine) {
-      if (tokenArray[i] === blockBodiesStart.shift()) {
-        newLine = false;
-      }
-      if ((/^\d+\b\.$/).test(tokenArray[i])) {
+      if ((/^\d+\b\.$/).test(tokenArray[i])) { // checks if string in format: 1. 2. 34.
         highlightedCode.push(styleCode(tokenArray[i], "text-amber-300"))
+      }else if ((/[^\*\+\s#>=-]/).test(tokenArray[i])) { // checks if token has a non special character in it
+        newLine = false;
+      }else if (i+1 < tokenArray.length && ("*_").includes(token[0])) {
+        if ((/[^\*\+\s#>=-]/).test(tokenArray[i + 1])) {
+          newLine = false;
+        }
       }else {
         highlightedCode.push(styleCode(tokenArray[i], "text-amber-500"))
       }
-    }else {
-      if (tokenArray[i] === '![' || tokenArray[i] === "[" || tokenArray[i] === "(" || tokenArray[i] === ")") {
-        highlightedCode.push(styleCode(tokenArray[i], "text-cyan-400"))
+    }
+    if (!newLine) {
+      if ((tokenArray[i] === '![' || tokenArray[i] === '[') && characterMatchs.length === 0) {
+        highlightedCode.push(styleCode(tokenArray[i], "text-cyan-300"))
+        characterMatchs.push(tokenArray[i])
+      }else if (tokenArray[i] === ']' && characterMatchs[0] === '[') {
+        highlightedCode.push(styleCode(tokenArray[i], "text-cyan-300"));
+        characterMatchs.pop()
+      }else if (i > 0 && (tokenArray[i] === '(') && (tokenArray[i-1] === ']')) {
+        highlightedCode.push(styleCode(tokenArray[i], "text-cyan-300"));
+        characterMatchs.push(tokenArray[i])
+      }else if ((tokenArray[i] === ")") && (characterMatchs[0] === '(')) {
+        highlightedCode.push(styleCode(tokenArray[i], "text-cyan-300"))
+        characterMatchs.pop()
+      }else if (characterMatchs[0] === '(') {
+        highlightedCode.push(styleCode(tokenArray[i], "text-sky-600 underline"))
       }else if (tokenArray[i].includes("*") || tokenArray[i].includes("_")) {
         highlightedCode.push(styleCode(tokenArray[i], "text-purple-400"))
-      }else if (i-1 >= 0 && tokenArray[i-1] === "(") {
-        highlightedCode.push(styleCode(tokenArray[i], "text-sky-500 underline"))
       }else {
+        if (tokenArray[i][0]=== '\n') newLine = true;
         highlightedCode.push(styleCode(tokenArray[i], "text-white"))
       }
     }
