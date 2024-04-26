@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef } from "react"
 import { getCurrentCaretPosition, moveCaretToNewPosition } from "../utilities"
 
 const operators = ["...", "in", "new", '+', '!', '?', '%', '-', '/', '*', '^', '|', '&', '=', '<', '>']
-const delimiters = " .;,(){}[]\n\t"
+const delimiters = " :.;,(){}[]\n\t"
 const numbers = "0123456789"
 const lineComment = "//"
 const multiLineCommentStart = "/*"
@@ -180,6 +180,8 @@ function highlightCode(text: string, newCaretOffset: number) : any { // js only 
   return [highlightedCode, lineNum, caretElement, caretOffset]
 }
 
+
+// TODO add Escape character highlighting
 function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let token = "";
   let beginningOfLine = true
@@ -189,11 +191,10 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let i = 0;
   let caretOffset = 0;
   let caretElement = null;
-  const tokenArray: string[] = [];
   let newToken = false
   let linkAddressToken = false;
-  let plainTextToken = true;
-
+  let plainTextToken = false;
+  const tokenArray: string[] = [];
 
   while (stringNotProcessed) {
     let char = ( i < text.length ? text[i] : "")
@@ -244,6 +245,11 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
         if (previousChar !== "_" && previousChar !== '*') {
           newToken = true;
         }
+      }else if (char === '`') {
+        if (token && token[0] !== '`') {
+          newToken = true;
+          plainTextToken = false;
+        }
       }else if (char === '\n') {
         if (token && token[0] !== '\n') {
           newToken = true;
@@ -272,7 +278,7 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
 
     if (newToken && token) {
       tokenArray.push(token)
-      newToken = false; 
+      newToken = false;
       token = ""
     }
     token += char 
@@ -280,7 +286,7 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
   }
   let newLine = true;
   let cummulativeStrLen = 0;
-  let characterMatchs : string[] = []
+  let characterPairs : string[] = []
 
   for (let i=0; i<tokenArray.length; i++) {
     if (newLine) {
@@ -288,36 +294,49 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
         highlightedCode.push(styleCode(tokenArray[i], "text-amber-300"))
       }else if ((/[^\*\+\s#>=-]/).test(tokenArray[i])) { // checks if token has a non special character in it
         newLine = false;
-      }else if (i+1 < tokenArray.length && ("*_").includes(token[0])) {
-        if ((/[^\*\+\s#>=-]/).test(tokenArray[i + 1])) {
-          newLine = false;
-        }
+      }else if (i+1 < tokenArray.length && (/[^\*\+\s#>=-]/).test(tokenArray[i + 1])) {
+        newLine = false;
       }else {
         highlightedCode.push(styleCode(tokenArray[i], "text-amber-500"))
       }
     }
     if (!newLine) {
-      if ((tokenArray[i] === '![' || tokenArray[i] === '[') && characterMatchs.length === 0) {
-        highlightedCode.push(styleCode(tokenArray[i], "text-cyan-300"))
-        characterMatchs.push(tokenArray[i])
-      }else if (tokenArray[i] === ']' && characterMatchs[0] === '[') {
-        highlightedCode.push(styleCode(tokenArray[i], "text-cyan-300"));
-        characterMatchs.pop()
-      }else if (i > 0 && (tokenArray[i] === '(') && (tokenArray[i-1] === ']')) {
-        highlightedCode.push(styleCode(tokenArray[i], "text-cyan-300"));
-        characterMatchs.push(tokenArray[i])
-      }else if ((tokenArray[i] === ")") && (characterMatchs[0] === '(')) {
-        highlightedCode.push(styleCode(tokenArray[i], "text-cyan-300"))
-        characterMatchs.pop()
-      }else if (characterMatchs[0] === '(') {
-        highlightedCode.push(styleCode(tokenArray[i], "text-sky-600 underline"))
-      }else if (tokenArray[i].includes("*") || tokenArray[i].includes("_")) {
-        highlightedCode.push(styleCode(tokenArray[i], "text-purple-400"))
-      }else {
-        if (tokenArray[i][0]=== '\n') newLine = true;
-        highlightedCode.push(styleCode(tokenArray[i], "text-white"))
+      if (tokenArray[i][0] === '\n'){
+        newLine = true;
+      }else if (characterPairs.length === 0) {
+        if (tokenArray[i] === '![' || tokenArray[i] === '[') {
+          highlightedCode.push(styleCode(tokenArray[i], "text-cyan-300"))
+          characterPairs.push(tokenArray[i])
+        }else if (tokenArray[i][0] === '`') {
+          characterPairs.push(tokenArray[i])
+          highlightedCode.push(styleCode(tokenArray[i], "text-gray-300"))
+        }else if (i > 0 && (tokenArray[i] === '(') && (tokenArray[i-1] === ']')) {
+          highlightedCode.push(styleCode(tokenArray[i], "text-cyan-300"));
+          characterPairs.push(tokenArray[i])
+        }else if (tokenArray[i].includes("*") || tokenArray[i].includes("_")){
+          highlightedCode.push(styleCode(tokenArray[i], "text-purple-400"))
+        }else highlightedCode.push(styleCode(tokenArray[i], "text-white"))
+      }else if (characterPairs.length > 0) {
+        if (tokenArray[i] === ']' && characterPairs[0] === '[') {
+          highlightedCode.push(styleCode(tokenArray[i], "text-cyan-300"));
+          characterPairs.pop()
+        }else if ((tokenArray[i] === ")") && (characterPairs[0] === '(')) {
+          highlightedCode.push(styleCode(tokenArray[i], "text-cyan-300"))
+          characterPairs.pop()
+        }else if (characterPairs[0] === '(') {
+          highlightedCode.push(styleCode(tokenArray[i], "text-sky-600 underline"))
+        }else if ((tokenArray[i].includes("*") || tokenArray[i].includes("_")) && characterPairs[0][0] !== '`'){
+          highlightedCode.push(styleCode(tokenArray[i], "text-purple-400"))
+        }else if (tokenArray[i][0] === '`') {
+          if (characterPairs[characterPairs.length-1] === tokenArray[i]) {
+            characterPairs.pop()
+          }
+          highlightedCode.push(styleCode(tokenArray[i], "text-gray-300"))
+        }else if (characterPairs[characterPairs.length-1][0] === '`') {
+          highlightedCode.push(styleCode(tokenArray[i], "text-gray-200 bg-slate-600"))
+        }else highlightedCode.push(styleCode(tokenArray[i], "text-white"))
       }
-    }
+    } 
     let lti = highlightedCode.length-1
     cummulativeStrLen += tokenArray[i].length
     if (cummulativeStrLen >= newCaretOffset && !caretElement) {
@@ -388,12 +407,15 @@ export default function CodeEditor() {
   }
 
   return (
-    <div className="flex bg-slate-700">
-    {/*<div className="text-gray-200 px-2 leading-tight">{generateNumForLines()}</div>*/}
-     {/*pre element's content isn't stored in state because Component's with `contentEditable` can't contain `children` managed by React*/} 
-     <pre contentEditable spellCheck="false" onInput={reStyleCode} ref={preElement} onKeyDown={interceptEnterKey}
-      className="block leading-tight text-white pl-2 caret-amber-600 outline-none flex-grow">
-     </pre>
-    </div>
+    <section className="overflow-x-auto bg-slate-700">
+      <div className="flex">
+      {/*<div className="text-gray-200 px-2 leading-tight">{generateNumForLines()}</div>*/}
+       {/*pre element's content isn't stored in state because Component's with `contentEditable` can't contain `children` managed by React*/} 
+       <pre contentEditable spellCheck="false" onInput={reStyleCode} ref={preElement} onKeyDown={interceptEnterKey}
+        className="block leading-tight text-white pl-2 caret-amber-600 outline-none flex-grow">
+       </pre>
+      </div>
+      <div className="w-full h-12"></div>
+    </section>
   )
 }
