@@ -187,164 +187,138 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let beginningOfLine = true
   let stringNotProcessed = true
   let highlightedCode = [];
-  let openedBrackets = false;
   let i = 0;
   let caretOffset = 0;
   let caretElement = null;
-  let newToken = false
-  let linkAddressToken = false;
-  let plainTextToken = false;
-  const tokenArray: string[] = [];
+  let currentTokenType = null;
+  let prevTokenType = null;
+  const characterPairs: string[] = [];
 
   while (stringNotProcessed) {
     let char = ( i < text.length ? text[i] : "")
 
+    let previousChar = i-1 >= 0 ? text[i-1] : "";
+
+    if (char === '\\' && currentTokenType !== 'escaped char') {
+      prevTokenType = currentTokenType
+      currentTokenType = 'escaped char'
+    }
+
     if (beginningOfLine && char) {
       if (("-+#>=").includes(char)) {
-        if (token && !("-+#>=").includes(token[0])) {
-          newToken = true;
+        if (currentTokenType !== 'block list') {
+          prevTokenType = currentTokenType
+          currentTokenType = 'block list'
         }
       }else if (("0123456789.").includes(char)){
-        if (token && !(/\d+|\./).test(token[0])) {
-          newToken = true;
+         if (currentTokenType !== 'ordered list item') {
+          prevTokenType = currentTokenType
+          currentTokenType = 'ordered list item'
         }
-      }else if (char === '*' || char === '_') {
-        if (token && (token[0] !== '*' && token[0] !== '_')) {
-          newToken = true;
+      }else if (char === " " || char === "\n"){
+        if (currentTokenType !== 'markdown delimiters') {
+          prevTokenType = currentTokenType
+          currentTokenType = 'markdown delimiters'
         }
-      }else if (char === " " || char === "\n") {
-        if (token && (token[0] !== " " && token[0] !== '\n')) {
-          newToken = true;
+      }else if (char === '*') {
+        if (currentTokenType !== 'unknown') {
+          prevTokenType = currentTokenType
+          currentTokenType = 'unknown' // check it when parsing
         }
-      }else if (char !== "\n") {
+      }else {
         beginningOfLine = false;
       }
     }
 
-    let previousChar = i-1 >= 0 ? text[i-1] : "";
-
-    if (!beginningOfLine && previousChar !== '\\' && !linkAddressToken) {
-      if (char === '[' && !openedBrackets) {
+    if (!beginningOfLine && char) {
+      if (currentTokenType === "link address") {
+        if (char === ")") {
+          prevTokenType = currentTokenType
+          currentTokenType = "link address delimiter";
+        }
+      }else if (currentTokenType === "link address delimiter" && previousChar === '(') {
+        prevTokenType = currentTokenType
+        currentTokenType = "link address"
+      }else if (currentTokenType === 'escaped char') { // still buggy
+        if (token.length === 2) {
+          prevTokenType = currentTokenType
+          currentTokenType = null
+        }
+      }else if (char === '[' && !(['[', '![']).includes(characterPairs[0])) {
         if (previousChar === "!") {
-          token = token.slice(0, token.length-1)
           char = '!['
         }
-        openedBrackets = true;
-        newToken = true;
-        plainTextToken = false;
-      }else if (char === ']' && openedBrackets) {
-        newToken = true;
-        openedBrackets = false;
-        plainTextToken = false;
+        characterPairs.push(char)
+        prevTokenType = currentTokenType
+        currentTokenType = "link text delimiter";
+      }else if (char === ']' && (['[', '![']).includes(characterPairs[0])) {
+        characterPairs.pop()
+        prevTokenType = currentTokenType
+        currentTokenType = "link text delimiter";
       }else if (char === "(" && token === ']') {
-        newToken = true;
-        linkAddressToken = true;
-        plainTextToken = false;
+        prevTokenType = currentTokenType
+        currentTokenType = "link address delimiter"
       }else if (char === "*" || char === "_") {
-        plainTextToken = false;
-        if (previousChar !== "_" && previousChar !== '*') {
-          newToken = true;
+        if (currentTokenType !== "emphasis|strong tag") {
+          prevTokenType = currentTokenType
+          currentTokenType = "emphasis|strong tag"
         }
       }else if (char === '`') {
-        if (token && token[0] !== '`') {
-          newToken = true;
-          plainTextToken = false;
+        if (currentTokenType !== "code block") {
+          prevTokenType = currentTokenType
+          currentTokenType = "code block"
         }
-      }else if (char === '\n') {
-        if (token && token[0] !== '\n') {
-          newToken = true;
-        }
-      }else if (!plainTextToken) {
-        plainTextToken = true;
-        newToken = true;
+      }else if (currentTokenType !== "plain text" && currentTokenType !== "escaped char") {
+        prevTokenType = currentTokenType;
+        currentTokenType = "plain text"
       }
-    }else {
-      if (linkAddressToken && token === '('){
-        newToken = true;
-      }else if (char === ')' && linkAddressToken) {
-        linkAddressToken = false;
-        newToken = true;
-      }
-    }
-
-    if (char === '\n' && i !== text.length-1 && !linkAddressToken) {
-      beginningOfLine = true
     }
 
     if (i === text.length) { // last iteration
-      newToken = true;
+      if (currentTokenType) {
+        prevTokenType = currentTokenType
+      }
       stringNotProcessed = false;
     }
 
-    if (newToken && token) {
-      tokenArray.push(token)
-      newToken = false;
+    if (prevTokenType) {
+      let lti = highlightedCode.length - 1 // lastTokenIndex
+      if (beginningOfLine) {
+        if (prevTokenType === "block list" || prevTokenType === "unknown") {
+          highlightedCode.push(styleCode(token, "text-amber-500"))
+        }else if (prevTokenType === "ordered list item" && (/^\d+\b\.$/).test(token)) {
+          highlightedCode.push(styleCode(token, "text-amber-300"))
+        }else if (prevTokenType === "markdown delimiters" ){
+          highlightedCode.push(styleCode(token, ""))
+        }else beginningOfLine = false; // ?
+      }
+
+      if (!beginningOfLine) {
+        if (prevTokenType === "link address delimiter") {
+          highlightedCode.push(styleCode(token, "text-cyan-300"));
+        }else if (prevTokenType === "link address") {
+          highlightedCode.push(styleCode(token, "text-sky-600 underline"))
+        }else if (prevTokenType === "link text delimiter") {
+          highlightedCode.push(styleCode(token, "text-cyan-300"));
+        }else if (prevTokenType === "emphasis|strong tag" || prevTokenType === "unknown") {
+          highlightedCode.push(styleCode(token, "text-purple-400"))
+        }else if (prevTokenType === "code block") {
+          highlightedCode.push(styleCode(token, "text-gray-200 bg-slate-600"))
+        }else {
+          highlightedCode.push(styleCode(token, "text-white"))
+        }
+      }
+      if (i >= newCaretOffset && !caretElement) {
+        caretElement = highlightedCode[lti+1]
+        caretOffset = caretElement.innerText.length - (i - newCaretOffset)
+      }
       token = ""
+      prevTokenType = null;
     }
     token += char 
     i++
   }
-  let newLine = true;
-  let cummulativeStrLen = 0;
-  let characterPairs : string[] = []
-
-  for (let i=0; i<tokenArray.length; i++) {
-    if (newLine) {
-      if ((/^\d+\b\.$/).test(tokenArray[i])) { // checks if string in format: 1. 2. 34.
-        highlightedCode.push(styleCode(tokenArray[i], "text-amber-300"))
-      }else if ((/[^\*\+\s#>=-]/).test(tokenArray[i])) { // checks if token has a non special character in it
-        newLine = false;
-      }else if (i+1 < tokenArray.length && (/[^\*\+\s#>=-]/).test(tokenArray[i + 1])) {
-        newLine = false;
-      }else {
-        highlightedCode.push(styleCode(tokenArray[i], "text-amber-500"))
-      }
-    }
-    if (!newLine) {
-      if (tokenArray[i][0] === '\n'){
-        newLine = true;
-      }else if (characterPairs.length === 0) {
-        if (tokenArray[i] === '![' || tokenArray[i] === '[') {
-          highlightedCode.push(styleCode(tokenArray[i], "text-cyan-300"))
-          characterPairs.push(tokenArray[i])
-        }else if (tokenArray[i][0] === '`') {
-          characterPairs.push(tokenArray[i])
-          highlightedCode.push(styleCode(tokenArray[i], "text-gray-300"))
-        }else if (i > 0 && (tokenArray[i] === '(') && (tokenArray[i-1] === ']')) {
-          highlightedCode.push(styleCode(tokenArray[i], "text-cyan-300"));
-          characterPairs.push(tokenArray[i])
-        }else if (tokenArray[i].includes("*") || tokenArray[i].includes("_")){
-          highlightedCode.push(styleCode(tokenArray[i], "text-purple-400"))
-        }else highlightedCode.push(styleCode(tokenArray[i], "text-white"))
-      }else if (characterPairs.length > 0) {
-        if (tokenArray[i] === ']' && characterPairs[0] === '[') {
-          highlightedCode.push(styleCode(tokenArray[i], "text-cyan-300"));
-          characterPairs.pop()
-        }else if ((tokenArray[i] === ")") && (characterPairs[0] === '(')) {
-          highlightedCode.push(styleCode(tokenArray[i], "text-cyan-300"))
-          characterPairs.pop()
-        }else if (characterPairs[0] === '(') {
-          highlightedCode.push(styleCode(tokenArray[i], "text-sky-600 underline"))
-        }else if ((tokenArray[i].includes("*") || tokenArray[i].includes("_")) && characterPairs[0][0] !== '`'){
-          highlightedCode.push(styleCode(tokenArray[i], "text-purple-400"))
-        }else if (tokenArray[i][0] === '`') {
-          if (characterPairs[characterPairs.length-1] === tokenArray[i]) {
-            characterPairs.pop()
-          }
-          highlightedCode.push(styleCode(tokenArray[i], "text-gray-300"))
-        }else if (characterPairs[characterPairs.length-1][0] === '`') {
-          highlightedCode.push(styleCode(tokenArray[i], "text-gray-200 bg-slate-600"))
-        }else highlightedCode.push(styleCode(tokenArray[i], "text-white"))
-      }
-    } 
-    let lti = highlightedCode.length-1
-    cummulativeStrLen += tokenArray[i].length
-    if (cummulativeStrLen >= newCaretOffset && !caretElement) {
-      caretElement = highlightedCode[lti]
-      caretOffset = caretElement.innerText.length - (cummulativeStrLen - newCaretOffset)
-    }
-  }
-  let lineNum = 1
+  const lineNum = 0
   return [highlightedCode, lineNum, caretElement, caretOffset]
 }
 
