@@ -192,7 +192,8 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let caretElement = null;
   let currentTokenType = null;
   let prevTokenType = null;
-  const characterPairs: string[] = [];
+  let openedLinkText = "";
+  let openedBacktick = "";
 
   while (stringNotProcessed) {
     let char = ( i < text.length ? text[i] : "")
@@ -230,6 +231,17 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       }
     }
 
+    if (currentTokenType === "code block") {
+      if (openedBacktick === token) {
+        currentTokenType = "code block delimiter end"
+        openedBacktick = "";
+      }else if (char === '\n') {
+        prevTokenType = "code block"
+        currentTokenType = "plain text"
+        openedBacktick = "";
+      }
+    }
+
     if (!beginningOfLine && char) {
       if (currentTokenType === "link address") {
         if (char === ")") {
@@ -244,17 +256,25 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
           prevTokenType = currentTokenType
           currentTokenType = null
         }
-      }else if (char === '[' && !(['[', '![']).includes(characterPairs[0])) {
+      }else if (char === '`') {
+        if (previousChar !== '`'){
+          prevTokenType = currentTokenType
+        }
+        if (!openedBacktick) {
+          currentTokenType = "code block delimiter"
+        }
+      }else if (char === '[' && !openedLinkText) {
         if (previousChar === "!") {
+          token = token.slice(0, token.length-1) // inefficient?
           char = '!['
         }
-        characterPairs.push(char)
+        openedLinkText = char
         prevTokenType = currentTokenType
         currentTokenType = "link text delimiter";
-      }else if (char === ']' && (['[', '![']).includes(characterPairs[0])) {
-        characterPairs.pop()
+      }else if (char === ']' && openedLinkText) {
         prevTokenType = currentTokenType
         currentTokenType = "link text delimiter";
+        openedLinkText = "";
       }else if (char === "(" && token === ']') {
         prevTokenType = currentTokenType
         currentTokenType = "link address delimiter"
@@ -263,15 +283,17 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
           prevTokenType = currentTokenType
           currentTokenType = "emphasis|strong tag"
         }
-      }else if (char === '`') {
-        if (currentTokenType !== "code block") {
-          prevTokenType = currentTokenType
+      }else if (currentTokenType !== "plain text" && currentTokenType !== "escaped char" && currentTokenType !== "code block") {
+        prevTokenType = currentTokenType
+        if (currentTokenType === "code block delimiter") {
+          openedBacktick = token;
           currentTokenType = "code block"
-        }
-      }else if (currentTokenType !== "plain text" && currentTokenType !== "escaped char") {
-        prevTokenType = currentTokenType;
-        currentTokenType = "plain text"
+        }else currentTokenType = "plain text" 
       }
+    }
+
+    if (char === '\n' && i !== text.length-1){ // there's usually a redundant new line at the end of text param
+      beginningOfLine = true;
     }
 
     if (i === text.length) { // last iteration
@@ -303,11 +325,14 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
         }else if (prevTokenType === "emphasis|strong tag" || prevTokenType === "unknown") {
           highlightedCode.push(styleCode(token, "text-purple-400"))
         }else if (prevTokenType === "code block") {
-          highlightedCode.push(styleCode(token, "text-gray-200 bg-slate-600"))
+          highlightedCode.push(styleCode(token, "text-white bg-slate-600"))
+        }else if (prevTokenType === "code block delimiter" || prevTokenType === "code block delimiter end"){
+          highlightedCode.push(styleCode(token, "text-slate-500"))
         }else {
           highlightedCode.push(styleCode(token, "text-white"))
         }
       }
+
       if (i >= newCaretOffset && !caretElement) {
         caretElement = highlightedCode[lti+1]
         caretOffset = caretElement.innerText.length - (i - newCaretOffset)

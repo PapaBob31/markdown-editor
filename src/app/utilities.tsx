@@ -15,7 +15,11 @@ export function moveCaretToNewPosition(newCaretOffset: number, textNode: HTMLEle
     return
   }
   const range = selection.getRangeAt(0)
-  range.setStart(textNode, newCaretOffset)
-  range.setEnd(textNode, newCaretOffset)
+  range.setStart(textNode, 0) // why does firefox ignore new lines in it's ranges
+  range.setEnd(textNode, 0)
   selection.addRange(range)
+  selection.collapseToEnd()
+  for (let i=0; i<newCaretOffset; i++) { // very inefficient but it works cross browser (DAMN YOU FIREFOX!). must find better alternative
+    selection.modify("move", "right", "character")
+  }  
 }
