@@ -96,90 +96,6 @@ function highlightedToken(tokenType:string, token:string) {
   }else return styleCode(token, "text-white")
 }
 
-function highlightCode(text: string, newCaretOffset: number) : any { // js only for now. Needs serious optimization
-  let token = ""
-  let openedQuotesType = "" // stores the type of opened quotes (' or ") if any is encountered during the loop
-  let highlightedCode: HTMLElement[] = []
-  let prevTokenType = null
-  let currentTokenType = null
-  let stringNotParsed = true
-  let commentType = ""
-  let lineNum = 1
-  let i = 0;
-  let caretOffset = 0
-  let caretElement = null
-
-  while (stringNotParsed) {
-    let char = ( i < text.length ? text[i] : "")
-
-    if (char === '\n' && i !== text.length-1){ // there's usually a redundant new line at the end of text param
-      lineNum++
-    }
-
-    if (endOfComment(commentType, char, token)) {
-      prevTokenType = currentTokenType
-      commentType = ""
-    }else {
-      if (token.length > 1 && openedQuotesType === token[token.length-1]){
-        openedQuotesType = ''
-        prevTokenType = currentTokenType
-      }
-
-      if (char === '\n' && (openedQuotesType === '"' || openedQuotesType === "'")) {
-        openedQuotesType = ''
-        prevTokenType = currentTokenType
-      }
-    }
-
-    if (!openedQuotesType && !commentType) {
-      if(char === '"' || char === "'" || char === "`") {
-        openedQuotesType = char
-        prevTokenType = currentTokenType
-        currentTokenType = "string"
-      }else {
-        commentType = checkForComment(text, i)
-        if (commentType) {
-          prevTokenType = currentTokenType
-          currentTokenType = "comment"
-        }
-      }
-      if (!commentType && !openedQuotesType) {
-        if (char){
-          [prevTokenType, currentTokenType] = checkTokenType(char, currentTokenType as string)
-        }
-      }
-    }
-    
-    if (i === text.length) { // last iteration
-      if (currentTokenType) {
-        prevTokenType = currentTokenType
-      }
-      stringNotParsed = false
-    }
-    
-    if (prevTokenType) {
-      let lti = highlightedCode.length - 1 // lastTokenIndex
-      if (prevTokenType === "comment") {
-        highlightedCode.push(highlightedToken(prevTokenType, token))
-      }else if (prevTokenType === "delimiter") {
-        if (token.trimStart()[0] === "(" && highlightedCode[lti].classList.contains("text-white")) {
-          highlightedCode[lti].classList.replace("text-white", "text-sky-500")
-        }
-        highlightedCode.push(highlightedToken(prevTokenType, token))
-      }else highlightedCode.push(highlightedToken(prevTokenType, token))
-      if (i >= newCaretOffset && !caretElement) {
-        caretElement = highlightedCode[lti+1]
-        caretOffset = caretElement.innerText.length - (i - newCaretOffset)
-      }
-      prevTokenType = null
-      token = ""
-    }
-    token += char
-    i++
-  }
-  return [highlightedCode, lineNum, caretElement, caretOffset]
-}
-
 
 // TODO add Escape character highlighting
 function highlightMarkDown(text: string, newCaretOffset: number) : any {
@@ -192,20 +108,22 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let caretElement = null;
   let currentTokenType = null;
   let prevTokenType = null;
-  let openedLinkText = "";
   let openedBacktick = "";
+  let codeBlock = false;
+  let lineNum = 1;
+  let openedQuotesType = "" // stores the type of opened quotes (' or ") if any is encountered during the loop
+  let commentType = ""
+  let lastSpaceIndex = 0;
+  let normalParsing = false;
+  let linkState: string|null = null;
 
   while (stringNotProcessed) {
     let char = ( i < text.length ? text[i] : "")
 
     let previousChar = i-1 >= 0 ? text[i-1] : "";
 
-    if (char === '\\' && currentTokenType !== 'escaped char') {
-      prevTokenType = currentTokenType
-      currentTokenType = 'escaped char'
-    }
-
-    if (beginningOfLine && char) {
+    if (beginningOfLine && char && !codeBlock) {
+      console.log("wtf")
       if (("-+#>=").includes(char)) {
         if (currentTokenType !== 'block list') {
           prevTokenType = currentTokenType
@@ -216,84 +134,119 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
           prevTokenType = currentTokenType
           currentTokenType = 'ordered list item'
         }
+      }else if (char === '*') {
+        if (currentTokenType !== 'block list 1') {
+          prevTokenType = currentTokenType
+          currentTokenType = 'block list 1'
+        }
       }else if (char === " " || char === "\n"){
         if (currentTokenType !== 'markdown delimiters') {
           prevTokenType = currentTokenType
           currentTokenType = 'markdown delimiters'
         }
-      }else if (char === '*') {
-        if (currentTokenType !== 'unknown') {
-          prevTokenType = currentTokenType
-          currentTokenType = 'unknown' // check it when parsing
-        }
       }else {
-        beginningOfLine = false;
+        normalParsing = true;
       }
     }
 
-    if (currentTokenType === "code block") {
-      if (openedBacktick === token) {
-        currentTokenType = "code block delimiter end"
-        openedBacktick = "";
-      }else if (char === '\n') {
-        prevTokenType = "code block"
-        currentTokenType = "plain text"
-        openedBacktick = "";
+    if (normalParsing && char) {
+      if (!codeBlock && linkState !== "opened link address") {
+        if (linkState === "closed link text" && char !== '(') {
+          linkState = null
+        }
+        let nextChar = i+1 < text.length ? text[i+1] : "";
+        if (currentTokenType === "escaped char" && token.length < 2) {
+          currentTokenType = "escaped char"
+        }else if (char === '!' && nextChar === '[' && linkState !== "opened link text") {
+          prevTokenType = currentTokenType
+          currentTokenType = "link delimiter"
+        }else if (char  === '[' && linkState !== "opened link text") {
+          if (currentTokenType !== "link delimiter") {
+            prevTokenType = currentTokenType
+            currentTokenType = "link delimiter"
+          }
+          linkState = "opened link text"
+        }else if (char === ']' && linkState === "opened link text") {
+          prevTokenType = currentTokenType
+          currentTokenType = "link delimiter"
+          linkState = "closed link text"
+        }else if (char === '(' && linkState === "closed link text") {
+          prevTokenType = currentTokenType
+          currentTokenType = "link delimiter"
+          linkState = "opened link address"
+        }else if (char === "*" || char === "_") {
+          if (currentTokenType !== "emphasis|strong") {
+            prevTokenType = currentTokenType
+            currentTokenType = "emphasis|strong"
+          }
+        }else if (char === '\\') {
+          if (currentTokenType !== "escaped char" || token.length == 2) {
+            prevTokenType = currentTokenType
+            currentTokenType = "escaped char"
+          }
+        }else { 
+          if (currentTokenType !== "plain text") {
+            prevTokenType = currentTokenType
+            currentTokenType = "plain text"
+          }else if (currentTokenType !== "plain text") {
+            prevTokenType = currentTokenType
+            currentTokenType = "escaped char"
+          }
+        }        
+      }else if (linkState === "opened link address") {
+        if (token === "(") {
+          prevTokenType = currentTokenType
+          currentTokenType = "link address";
+        }else if (char == ')') {
+          prevTokenType = currentTokenType
+          currentTokenType = "link delimiter";
+          linkState = null;
+        }
+      }else if (codeBlock) {
       }
     }
+    
+    
+    /*
+    if (codeBlock) {
+      if (endOfComment(commentType, char, token)) {
+        prevTokenType = currentTokenType
+        commentType = ""
+      }else {
+        if (token.length > 1 && openedQuotesType === token[token.length-1]){
+          openedQuotesType = ''
+          prevTokenType = currentTokenType
+        }
 
-    if (!beginningOfLine && char) {
-      if (currentTokenType === "link address") {
-        if (char === ")") {
-          prevTokenType = currentTokenType
-          currentTokenType = "link address delimiter";
-        }
-      }else if (currentTokenType === "link address delimiter" && previousChar === '(') {
-        prevTokenType = currentTokenType
-        currentTokenType = "link address"
-      }else if (currentTokenType === 'escaped char') { // still buggy
-        if (token.length === 2) {
-          prevTokenType = currentTokenType
-          currentTokenType = null
-        }
-      }else if (char === '`') {
-        if (previousChar !== '`'){
+        if (char === '\n' && (openedQuotesType === '"' || openedQuotesType === "'")) {
+          openedQuotesType = ''
           prevTokenType = currentTokenType
         }
-        if (!openedBacktick) {
-          currentTokenType = "code block delimiter"
-        }
-      }else if (char === '[' && !openedLinkText) {
-        if (previousChar === "!") {
-          token = token.slice(0, token.length-1) // inefficient?
-          char = '!['
-        }
-        openedLinkText = char
-        prevTokenType = currentTokenType
-        currentTokenType = "link text delimiter";
-      }else if (char === ']' && openedLinkText) {
-        prevTokenType = currentTokenType
-        currentTokenType = "link text delimiter";
-        openedLinkText = "";
-      }else if (char === "(" && token === ']') {
-        prevTokenType = currentTokenType
-        currentTokenType = "link address delimiter"
-      }else if (char === "*" || char === "_") {
-        if (currentTokenType !== "emphasis|strong tag") {
-          prevTokenType = currentTokenType
-          currentTokenType = "emphasis|strong tag"
-        }
-      }else if (currentTokenType !== "plain text" && currentTokenType !== "escaped char" && currentTokenType !== "code block") {
-        prevTokenType = currentTokenType
-        if (currentTokenType === "code block delimiter") {
-          openedBacktick = token;
-          currentTokenType = "code block"
-        }else currentTokenType = "plain text" 
       }
-    }
+
+      if (!openedQuotesType && !commentType) {
+        if(char === '"' || char === "'" || char === "`") {
+          openedQuotesType = char
+          prevTokenType = currentTokenType
+          currentTokenType = "string"
+        }else {
+          commentType = checkForComment(text, i)
+          if (commentType) {
+            prevTokenType = currentTokenType
+            currentTokenType = "comment"
+          }
+        }
+        if (!commentType && !openedQuotesType) {
+          if (char){
+            [prevTokenType, currentTokenType] = checkTokenType(char, currentTokenType as string)
+          }
+        }
+      }
+    }*/
 
     if (char === '\n' && i !== text.length-1){ // there's usually a redundant new line at the end of text param
       beginningOfLine = true;
+      lineNum++
     }
 
     if (i === text.length) { // last iteration
@@ -305,24 +258,36 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
 
     if (prevTokenType) {
       let lti = highlightedCode.length - 1 // lastTokenIndex
-      if (beginningOfLine) {
-        if (prevTokenType === "block list" || prevTokenType === "unknown") {
+      if (beginningOfLine && !codeBlock) {
+        if (prevTokenType === "block list" || prevTokenType === "block list 1") {
           highlightedCode.push(styleCode(token, "text-amber-500"))
         }else if (prevTokenType === "ordered list item" && (/^\d+\b\.$/).test(token)) {
           highlightedCode.push(styleCode(token, "text-amber-300"))
         }else if (prevTokenType === "markdown delimiters" ){
           highlightedCode.push(styleCode(token, ""))
-        }else beginningOfLine = false; // ?
+          lastSpaceIndex = lti+1
+        }else beginningOfLine = false; // incase of tokens marked as "ordered list item" but not in the format 1., 2.
+
+        if (normalParsing) {
+          let index = lastSpaceIndex;
+          while (index < highlightedCode.length) {
+            if ((highlightedCode[index].textContent as string)[0] === "*") {
+              highlightedCode[index].className = "text-purple-400"
+            }else {
+              highlightedCode[index].className = "text-white"
+            }
+            index++;
+          }
+          lastSpaceIndex = 0;// ?
+        }
       }
 
-      if (!beginningOfLine) {
-        if (prevTokenType === "link address delimiter") {
+      if (!beginningOfLine && !codeBlock) {
+        if (prevTokenType === "link delimiter") {
           highlightedCode.push(styleCode(token, "text-cyan-300"));
         }else if (prevTokenType === "link address") {
           highlightedCode.push(styleCode(token, "text-sky-600 underline"))
-        }else if (prevTokenType === "link text delimiter") {
-          highlightedCode.push(styleCode(token, "text-cyan-300"));
-        }else if (prevTokenType === "emphasis|strong tag" || prevTokenType === "unknown") {
+        }else if (prevTokenType === "emphasis|strong") {
           highlightedCode.push(styleCode(token, "text-purple-400"))
         }else if (prevTokenType === "code block") {
           highlightedCode.push(styleCode(token, "text-white bg-slate-600"))
@@ -333,6 +298,17 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
         }
       }
 
+      if (codeBlock) {
+        if (prevTokenType === "comment") {
+          highlightedCode.push(highlightedToken(prevTokenType, token))
+        }else if (prevTokenType === "delimiter") {
+          if (token.trimStart()[0] === "(" && highlightedCode[lti].classList.contains("text-white")) {
+            highlightedCode[lti].classList.replace("text-white", "text-sky-500")
+          }
+          highlightedCode.push(highlightedToken(prevTokenType, token))
+        }else highlightedCode.push(highlightedToken(prevTokenType, token))
+      }
+
       if (i >= newCaretOffset && !caretElement) {
         caretElement = highlightedCode[lti+1]
         caretOffset = caretElement.innerText.length - (i - newCaretOffset)
@@ -340,10 +316,12 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       token = ""
       prevTokenType = null;
     }
+    if (normalParsing && beginningOfLine) {
+      beginningOfLine = false;
+    }
     token += char 
     i++
   }
-  const lineNum = 0
   return [highlightedCode, lineNum, caretElement, caretOffset]
 }
 
