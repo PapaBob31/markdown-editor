@@ -79,6 +79,7 @@ function styleCode(token: string, classStr: string) {
 
 // Generates a CODE HTML Element with a unique styling for a specific token type
 function highlightedToken(tokenType:string, token:string) {
+  // console.log(token, tokenType)
   if (tokenType === "comment") {
     return styleCode(token, "text-gray-300")
   }else if (tokenType === "string") {
@@ -116,6 +117,8 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let lastSpaceIndex = 0;
   let normalParsing = false;
   let linkState: string|null = null;
+  let codeBlock = false;
+  let codeBlockDelimiter = "";
 
   while (stringNotProcessed) {
     let char = ( i < text.length ? text[i] : "")
@@ -207,7 +210,41 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
         }
       }else if (codeHighlight) {
         if (openedBacktick){
-          if (char === '`') {
+          if (codeBlock){
+            if (endOfComment(commentType, char, token)) {
+              prevTokenType = currentTokenType
+              commentType = ""
+            }else {
+              if (token.length > 1 && openedQuotesType === token[token.length-1]){
+                openedQuotesType = ''
+                prevTokenType = currentTokenType
+              }
+
+              if (char === '\n' && (openedQuotesType === '"' || openedQuotesType === "'")) {
+                openedQuotesType = ''
+                prevTokenType = currentTokenType
+              }
+            }
+
+            if (!openedQuotesType && !commentType) {
+              if(char === '"' || char === "'" || char === "`") {
+                openedQuotesType = char
+                prevTokenType = currentTokenType
+                currentTokenType = "string"
+              }else {
+                commentType = checkForComment(text, i)
+                if (commentType) {
+                  prevTokenType = currentTokenType
+                  currentTokenType = "comment"
+                }
+              }
+              if (!commentType && !openedQuotesType) {
+                if (char){
+                  [prevTokenType, currentTokenType] = checkTokenType(char, currentTokenType as string)
+                }
+              }
+            }
+          }else if (char === '`') {
             if (currentTokenType !== 'code delimiter') {
               prevTokenType = currentTokenType
               currentTokenType = "code delimiter"
@@ -218,8 +255,21 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
             }else if (openedBacktick === (token + char)){
               codeHighlight = false
               openedBacktick = ""
-            } 
+            }
+          }else if (char === '\n') {
+            if (openedBacktick.length > 1){
+              if (currentTokenType === "inline code body") {
+                currentTokenType = "code type"
+              }
+              prevTokenType = currentTokenType
+              currentTokenType = "delimiter" // code block will parse it
+              codeBlock = true
+            }else {
+              prevTokenType = currentTokenType
+              currentTokenType = "plain text" // cause it's a plain text char normally
+            }
           }else if (currentTokenType !== "inline code body") {
+            // incase it encountered a '`' that wasn't enough to be a delimiter yet changed currentTokenType
             prevTokenType = currentTokenType = "inline code body";
           }
         }else {
@@ -229,54 +279,29 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
               currentTokenType = "code delimiter"
             }
           }else {
-            prevTokenType = currentTokenType
-            currentTokenType = "inline code body" // will it be needed
-            openedBacktick = token
+            if (char === '\n') {
+              if (token.length === 1) {
+                prevTokenType = "text-white"
+                codeHighlight = false
+              }else {
+                prevTokenType = "code type"
+                currentTokenType = "code block"
+                codeBlock = true;
+              }
+            }else {
+              prevTokenType = currentTokenType
+              currentTokenType = "inline code body" // will it be needed
+              openedBacktick = token
+            } 
           }
         }
       }
     }
-    
-    
-    /*
-    if (codeHighlight) {
-      if (endOfComment(commentType, char, token)) {
-        prevTokenType = currentTokenType
-        commentType = ""
-      }else {
-        if (token.length > 1 && openedQuotesType === token[token.length-1]){
-          openedQuotesType = ''
-          prevTokenType = currentTokenType
-        }
-
-        if (char === '\n' && (openedQuotesType === '"' || openedQuotesType === "'")) {
-          openedQuotesType = ''
-          prevTokenType = currentTokenType
-        }
-      }
-
-      if (!openedQuotesType && !commentType) {
-        if(char === '"' || char === "'" || char === "`") {
-          openedQuotesType = char
-          prevTokenType = currentTokenType
-          currentTokenType = "string"
-        }else {
-          commentType = checkForComment(text, i)
-          if (commentType) {
-            prevTokenType = currentTokenType
-            currentTokenType = "comment"
-          }
-        }
-        if (!commentType && !openedQuotesType) {
-          if (char){
-            [prevTokenType, currentTokenType] = checkTokenType(char, currentTokenType as string)
-          }
-        }
-      }
-    }*/
 
     if (char === '\n' && i !== text.length-1){ // there's usually a redundant new line at the end of text param
-      beginningOfLine = true;
+      if (!codeBlock) {
+        beginningOfLine = true;
+      }
       lineNum++
     }
 
@@ -324,21 +349,20 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
           highlightedCode.push(styleCode(token, "text-white bg-slate-600"))
         }else if (prevTokenType === "code delimiter"){
           highlightedCode.push(styleCode(token, "text-slate-400"))
-        }else {
-          highlightedCode.push(styleCode(token, "text-white"))
-        }
-      }
-
-      /*if (codeHighlight) {
-        if (prevTokenType === "comment") {
+        }else if (prevTokenType === "comment") {
           highlightedCode.push(highlightedToken(prevTokenType, token))
         }else if (prevTokenType === "delimiter") {
           if (token.trimStart()[0] === "(" && highlightedCode[lti].classList.contains("text-white")) {
             highlightedCode[lti].classList.replace("text-white", "text-sky-500")
           }
           highlightedCode.push(highlightedToken(prevTokenType, token))
+        }else if (prevTokenType === "plain text" || prevTokenType === "escaped char") {
+          highlightedCode.push(styleCode(token, "text-white"))
+        }else if (prevTokenType === "code type") {
+          highlightedCode.push(styleCode(token, "text-purple-300"))
         }else highlightedCode.push(highlightedToken(prevTokenType, token))
-      }*/
+      }
+        
 
       if (i >= newCaretOffset && !caretElement) {
         caretElement = highlightedCode[lti+1]
