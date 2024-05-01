@@ -15,11 +15,6 @@ const keywords = [
 ]
 const keywordsValues = ['true', 'false', 'null', 'undefined']
 
-// TODO:
-// search for all keywords and operators
-// HTML, CSS
-// Tab key press as well as tab representation
-
 // checks if a String has a comment starting at a given index in the string
 function checkForComment(text: string, index: number) {
   if (text.startsWith(lineComment, index)) {
@@ -69,7 +64,7 @@ function checkTokenType(char: string, currentTokenType: string) {
   return [prevTokenType, currentTokenType]
 }
 
-// Creates a CODE HTML Element and applies the classStr paarmeter as a class name for styling
+// Creates a CODE HTML Element and applies the classStr parameter as a class name for styling
 function styleCode(token: string, classStr: string) {
   let codeElement = document.createElement("code")
   codeElement.append(document.createTextNode(token)) // might break;
@@ -97,8 +92,158 @@ function highlightedToken(tokenType:string, token:string) {
   }else return styleCode(token, "text-white")
 }
 
+function getBlockElementType(char: string, currTokenType: string) {
+  if (("-+#>=").includes(char)) {
+    if (currTokenType !== 'block list') {
+      return 'block list'
+    }
+  }else if (("0123456789.").includes(char)){
+     if (currTokenType !== 'ordered list item') {
+      return 'ordered list item'
+    }
+  }else if (char === '*') {
+    if (currTokenType !== 'block list 1') {
+      return 'block list 1'
+    }
+  }else if (char === " " || char === "\n"){
+    if (currTokenType !== 'markdown delimiters') {
+      return 'markdown delimiters'
+    }
+  }else {
+    return null
+  }
+  return currTokenType
+}
 
-// TODO add Escape character highlighting
+function getInlineElementTokenType(char: string, nextChar: string, linkState: string | null, currTokenType: string | null) {
+  let prevTokenType = null;
+  if (char === '!' && nextChar === '[' && linkState !== "opened link text") {
+    prevTokenType = currTokenType
+    currTokenType = "link delimiter"
+  }else if (char  === '[' && linkState !== "opened link text") {
+    if (currTokenType !== "link delimiter") {
+      prevTokenType = currTokenType
+      currTokenType = "link delimiter"
+    }
+    linkState = "opened link text"
+  }else if (char === ']' && linkState === "opened link text") {
+    prevTokenType = currTokenType
+    currTokenType = "link delimiter"
+    linkState = "closed link text"
+  }else if (char === '(' && linkState === "closed link text") {
+    prevTokenType = currTokenType
+    currTokenType = "link delimiter"
+    linkState = "opened link address"
+  }else if (char === "*" || char === "_") {
+    if (currTokenType !== "emphasis|strong") {
+      prevTokenType = currTokenType
+      currTokenType = "emphasis|strong"
+    }
+  }else if (char === '\\') {
+    prevTokenType = currTokenType
+    currTokenType = "escape sequence"
+  }else if (currTokenType !== "plain text") {
+    prevTokenType = currTokenType
+    currTokenType = "plain text"
+  }
+  return [prevTokenType, currTokenType, linkState]
+}
+
+
+function getCodeBlockTokenType(){
+  if (openedBacktick){
+    if (codeBlock){
+      if (endOfComment(commentType, char, token)) {
+        prevTokenType = currentTokenType
+        commentType = ""
+      }else {
+        if (token.length > 1 && openedQuotesType === token[token.length-1]){
+          openedQuotesType = ''
+          prevTokenType = currentTokenType
+        }
+
+        if (char === '\n' && (openedQuotesType === '"' || openedQuotesType === "'")) {
+          openedQuotesType = ''
+          prevTokenType = currentTokenType
+        }
+      }
+
+      if (!openedQuotesType && !commentType) {
+        if(char === '"' || char === "'" || char === "`") {
+          openedQuotesType = char
+          prevTokenType = currentTokenType
+          currentTokenType = "string"
+        }else {
+          commentType = checkForComment(text, i)
+          if (commentType) {
+            prevTokenType = currentTokenType
+            currentTokenType = "comment"
+          }
+        }
+        if (!commentType && !openedQuotesType) {
+          if (char){
+            [prevTokenType, currentTokenType] = checkTokenType(char, currentTokenType as string)
+          }
+        }
+      }
+    }else if (char === '`') {
+      if (currentTokenType !== 'code delimiter') {
+        prevTokenType = currentTokenType
+        currentTokenType = "code delimiter"
+        if (char === openedBacktick) {
+          codeHighlight = false
+          openedBacktick = ""
+        }
+      }else if (openedBacktick === (token + char)){
+        codeHighlight = false
+        openedBacktick = ""
+      }
+    }else if (char === '\n') {
+      if (openedBacktick.length > 1){
+        if (currentTokenType === "inline code body") {
+          currentTokenType = "code type"
+        }
+        prevTokenType = currentTokenType
+        currentTokenType = "delimiter" // code block will parse it
+        codeBlock = true
+      }else {
+        prevTokenType = currentTokenType
+        currentTokenType = "plain text" // cause it's a plain text char normally
+      }
+    }else if (currentTokenType !== "inline code body") {
+      // incase it encountered a '`' that wasn't enough to be a delimiter yet changed currentTokenType
+      prevTokenType = currentTokenType = "inline code body";
+    }
+  }else {
+    if (char === '`') {
+      if (currentTokenType !== 'code delimiter') {
+        prevTokenType = currentTokenType
+        currentTokenType = "code delimiter"
+      }
+    }else {
+      if (char === '\n') {
+        if (token.length === 1) {
+          prevTokenType = "text-white"
+          codeHighlight = false
+        }else {
+          prevTokenType = "code type"
+          currentTokenType = "code block"
+          codeBlock = true;
+        }
+      }else {
+        prevTokenType = currentTokenType
+        currentTokenType = "inline code body" // will it be needed
+        openedBacktick = token
+      } 
+    }
+  }
+}
+
+// TODO:
+// search for all keywords and operators
+// HTML, CSS
+// Tab key press as well as tab representation
+// new line on highlighted text
 function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let token = "";
   let beginningOfLine = true
@@ -126,28 +271,12 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
     let previousChar = i-1 >= 0 ? text[i-1] : "";
 
     if (beginningOfLine && char && !codeHighlight) {
-      if (("-+#>=").includes(char)) {
-        if (currentTokenType !== 'block list') {
-          prevTokenType = currentTokenType
-          currentTokenType = 'block list'
-        }
-      }else if (("0123456789.").includes(char)){
-         if (currentTokenType !== 'ordered list item') {
-          prevTokenType = currentTokenType
-          currentTokenType = 'ordered list item'
-        }
-      }else if (char === '*') {
-        if (currentTokenType !== 'block list 1') {
-          prevTokenType = currentTokenType
-          currentTokenType = 'block list 1'
-        }
-      }else if (char === " " || char === "\n"){
-        if (currentTokenType !== 'markdown delimiters') {
-          prevTokenType = currentTokenType
-          currentTokenType = 'markdown delimiters'
-        }
-      }else {
-        normalParsing = true;
+      prevTokenType = currentTokenType
+      currentTokenType = getBlockElementType(char, currentTokenType as string)
+      if (!currentTokenType) {
+        normalParsing = true
+        currentTokenType = prevTokenType
+        prevTokenType = null
       }
     }
 
@@ -156,49 +285,17 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
         if (linkState === "closed link text" && char !== '(') {
           linkState = null
         }
-        let nextChar = i+1 < text.length ? text[i+1] : "";
-        if (currentTokenType === "escaped char" && token.length < 2) {
-          currentTokenType = "escaped char"
-        }else if (char === '!' && nextChar === '[' && linkState !== "opened link text") {
-          prevTokenType = currentTokenType
-          currentTokenType = "link delimiter"
-        }else if (char  === '[' && linkState !== "opened link text") {
-          if (currentTokenType !== "link delimiter") {
+        // token length will always be less than 2 if currenTokenType = "escape sequence"
+        if (currentTokenType !== "escape sequence" || token.length == 2) {
+          if (char === '`') {
             prevTokenType = currentTokenType
-            currentTokenType = "link delimiter"
-          }
-          linkState = "opened link text"
-        }else if (char === ']' && linkState === "opened link text") {
-          prevTokenType = currentTokenType
-          currentTokenType = "link delimiter"
-          linkState = "closed link text"
-        }else if (char === '(' && linkState === "closed link text") {
-          prevTokenType = currentTokenType
-          currentTokenType = "link delimiter"
-          linkState = "opened link address"
-        }else if (char === "*" || char === "_") {
-          if (currentTokenType !== "emphasis|strong") {
-            prevTokenType = currentTokenType
-            currentTokenType = "emphasis|strong"
-          }
-        }else if (char === '\\') {
-          if (currentTokenType !== "escaped char" || token.length == 2) {
-            prevTokenType = currentTokenType
-            currentTokenType = "escaped char"
-          }
-        }else if (char === '`') {
-          prevTokenType = currentTokenType
-          currentTokenType = "code delimiter"
-          codeHighlight = true;
-        }else { 
-          if (currentTokenType !== "plain text") {
-            prevTokenType = currentTokenType
-            currentTokenType = "plain text"
-          }else if (currentTokenType !== "plain text") {
-            prevTokenType = currentTokenType
-            currentTokenType = "escaped char"
-          }
-        }        
+            currentTokenType = "code delimiter"
+            codeHighlight = true;
+          }else {
+            let nextChar = i+1 < text.length ? text[i+1] : "";
+            [prevTokenType, currentTokenType, linkState] = getInlineElementTokenType(char, nextChar, linkState, currentTokenType)
+          }  
+        }  
       }else if (linkState === "opened link address") {
         if (token === "(") {
           prevTokenType = currentTokenType
