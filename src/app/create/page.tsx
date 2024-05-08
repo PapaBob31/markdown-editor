@@ -86,17 +86,21 @@ function highlightedToken(tokenType:string, token:string) {
     return styleCode(token, "text-sky-600 underline")
   }else if (tokenType === "emphasis|strong") {
     return styleCode(token, "text-purple-400")
+  }else if (tokenType === "tag delimiter" || tokenType === "assignment" ) {
+    return styleCode(token, "text-gray-300")
+  }else if (tokenType === "tag name") {
+    return styleCode(token, "text-red-400")
   }else if (tokenType === "inline code body") {
     return styleCode(token, "text-white bg-slate-600")
   }else if (tokenType === "code delimiter start" || tokenType === "code delimiter end"){
     return styleCode(token, "text-slate-400")
   }else if (tokenType === "plain text" || tokenType === "escaped char") {
     return styleCode(token, "text-white")
-  }else if (tokenType === "code type") {
+  }else if (tokenType === "code type" || tokenType === "attribute name") {
     return styleCode(token, "text-purple-300")
   }else if (tokenType === "comment") {
     return styleCode(token, "text-gray-300")
-  }else if (tokenType === "string") {
+  }else if (tokenType === "string" || tokenType === "value") {
     return styleCode(token, "text-green-300")
   }else if ( !isNaN(token * 0) && tokenType === 'unknown' ) { // todo: improve string is number check [2\\3 won't get parsed]
     return styleCode(token, "text-orange-300")
@@ -157,6 +161,8 @@ function getInlineElementTokenType(char: string, nextChar: string, linkState: st
     if (currTokenType !== "emphasis|strong") {
       currTokenType = "emphasis|strong"
     }
+  }else if (char === '<' && (/\w|\//).test(nextChar)) {
+    currTokenType = "tag delimiter"
   }else if (currTokenType !== "plain text") {
     currTokenType = "plain text"
   }
@@ -296,6 +302,10 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let normalParsing = false;
   let linkState: string|null = null;
   let codeBlock = false;
+  let openedHTMLTag = false;
+  let openedTagName = "";
+  let inTag = false;
+  let openingTag = false
 
   while (stringNotProcessed) {
     let char = ( i < text.length ? text[i] : "")
@@ -317,9 +327,13 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       if (char === '`' && !codeHighlight) {
         codeHighlight = true
       }
-      if (!codeHighlight && linkState !== "opened link address") {
+      if (!codeHighlight && linkState !== "opened link address" && !openedHTMLTag) {
         let nextChar = i+1<text.length ? text[i+1] : "";
         [prevTokenType, currentTokenType, linkState] = getInlineElementTokenType(char, nextChar, linkState, currentTokenType)
+        if (currentTokenType === "tag delimiter") {
+          openedHTMLTag = true;
+          inTag = true;
+        }
       }else if (linkState === "opened link address") {
         if (char == ')') {
           prevTokenType = currentTokenType
@@ -346,11 +360,75 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
         }else if (currentTokenType === "delimiter") {
           codeBlock = true
         }
+      }else if (openedHTMLTag) { // minimalistic html highlighter
+        let nextChar = i+1<text.length ? text[i+1] : "";
+        if (inTag) {
+          if (currentTokenType === "tag delimiter" && char !== '/') {
+            prevTokenType = currentTokenType
+            currentTokenType = "tag name"
+            if (token !== '<' && token !== '</') {
+              openedHTMLTag = false;
+            }else if (token === '<') {
+              openingTag = true
+            }
+          }
+          if (char === '>') {
+            inTag = false;
+            prevTokenType = currentTokenType
+            currentTokenType = "tag delimiter"
+            if (!openedTagName) {
+              openedTagName = token
+            }else if (openedTagName === token && !openingTag) {
+              openedHTMLTag = false;
+              inTag = false
+              openedTagName = ""
+            }
+          }else if (currentTokenType !== "value") {
+            if (char === "=" && currentTokenType !== "assignment") {
+              prevTokenType = currentTokenType
+              currentTokenType = "assignment"
+            }else if (currentTokenType === "assignment" && char !== ' ') {
+              prevTokenType = currentTokenType
+              currentTokenType = "value"
+            }
+          }else if (("\"'").includes(token[0])) {
+            if (token.length >  1 && token[0] === token[token.length-1]) {
+              prevTokenType = currentTokenType
+              currentTokenType = null
+            }
+          }
+          if (char === ' ' && currentTokenType !== "attribute name") {
+            if (currentTokenType === "value") {
+              if (!("\"'").includes(token[0])) {
+                prevTokenType = currentTokenType
+                currentTokenType = "attribute name"
+              }
+            }else if (currentTokenType === "assignment") {
+              prevTokenType = currentTokenType
+              currentTokenType = "value"
+            }else if (currentTokenType === "tag name") {
+              prevTokenType = currentTokenType
+              currentTokenType = "attribute name"
+              openedTagName = token
+              if (!openedTagName) {
+                openedTagName = token
+              }
+            }
+          }
+        }else if (char === '<' && (/\w|\//).test(nextChar)) {
+          prevTokenType = currentTokenType
+          currentTokenType = "tag delimiter"
+          inTag = true
+        }else if (currentTokenType !== "plain text") {
+          prevTokenType = currentTokenType
+          currentTokenType = "plain text"
+          openingTag = false
+        }
       }
     }
 
     if (char === '\n' && i !== text.length-1){ // there's sometimes a redundant new line at the end of text param
-      if (!codeHighlight) {
+      if (!codeHighlight && !openedHTMLTag) {
         beginningOfLine = true;
         normalParsing = false;
       }
