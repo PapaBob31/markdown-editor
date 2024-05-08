@@ -74,7 +74,6 @@ function styleCode(token: string, classStr: string) {
 
 // Generates a CODE HTML Element with a unique styling for a specific token type
 function highlightedToken(tokenType:string, token:string) {
-  console.log(tokenType, 78)
   if (tokenType === "block list" || tokenType === "block list 1"){
     return styleCode(token, "text-amber-500")
   }else if (tokenType === "ordered list item" && (/^\d+\b\.$/).test(token)) {
@@ -89,7 +88,7 @@ function highlightedToken(tokenType:string, token:string) {
     return styleCode(token, "text-purple-400")
   }else if (tokenType === "inline code body") {
     return styleCode(token, "text-white bg-slate-600")
-  }else if (tokenType === "code delimiter"){
+  }else if (tokenType === "code delimiter start" || tokenType === "code delimiter end"){
     return styleCode(token, "text-slate-400")
   }else if (tokenType === "plain text" || tokenType === "escaped char") {
     return styleCode(token, "text-white")
@@ -133,39 +132,36 @@ function getBlockElementType(char: string, currTokenType: string) {
   }else {
     return null
   }
-  return currTokenType
+  return currTokenType // incase current token type hasn't changed
 }
 
 function getInlineElementTokenType(char: string, nextChar: string, linkState: string | null, currTokenType: string | null) {
-  let prevTokenType = null;
+  if (linkState === "closed link text" && char !== '(') {
+    linkState = null
+  }
+
+  let prevTokenType = currTokenType;
   if (char === '!' && nextChar === '[' && linkState !== "opened link text") {
-    prevTokenType = currTokenType
     currTokenType = "link delimiter"
   }else if (char  === '[' && linkState !== "opened link text") {
     if (currTokenType !== "link delimiter") {
-      prevTokenType = currTokenType
       currTokenType = "link delimiter"
     }
     linkState = "opened link text"
   }else if (char === ']' && linkState === "opened link text") {
-    prevTokenType = currTokenType
     currTokenType = "link delimiter"
     linkState = "closed link text"
   }else if (char === '(' && linkState === "closed link text") {
-    prevTokenType = currTokenType
-    currTokenType = "link delimiter"
     linkState = "opened link address"
   }else if (char === "*" || char === "_") {
     if (currTokenType !== "emphasis|strong") {
-      prevTokenType = currTokenType
       currTokenType = "emphasis|strong"
     }
-  }else if (char === '\\') {
-    prevTokenType = currTokenType
-    currTokenType = "escape sequence"
   }else if (currTokenType !== "plain text") {
-    prevTokenType = currTokenType
     currTokenType = "plain text"
+  }
+  if (prevTokenType === currTokenType) {
+    prevTokenType = null
   }
   return [prevTokenType, currTokenType, linkState]
 }
@@ -235,22 +231,38 @@ function getClangTokenType() {
 // Tab key press as well as tab representation
 // new line on highlighted text
 
-
-function getCodeBlockBodyToken(char: string, currTokenType: string, openedBacktick: string) {
+function getCodeEndDelimiterTokenType(char: string, openedBacktick: string, token: string, currentTokenType: string) {
   let prevTokenType = null
-  if (currTokenType !== "inline code body") {
-    prevTokenType = currTokenType
-    currTokenType = "inline code body"
-  }else if (char === '\n') {
-    if (openedBacktick === '`') {
-      prevTokenType = currTokenType
-      currTokenType = "plain text"
-    }else {
-      prevTokenType = "code type"
-      currTokenType = "delimiter"
+  if (char === '`') {
+    if (token[token.length - 1] !== '`') {
+     prevTokenType = currentTokenType 
     }
+    if (char === openedBacktick || (token + char) === openedBacktick) {
+      currentTokenType = "code delimiter end"
+    }
+  }else if (char === '\n') {
+    prevTokenType = "code type"
+    currentTokenType = "delimiter"
   }
-  return [prevTokenType, currTokenType]
+  return [prevTokenType, currentTokenType]
+}
+
+function getCodeStartDelimiterTokenType(char: string, token: string, currentTokenType: string) {
+  let prevTokenType = null
+  if (char !== '`') {
+    prevTokenType = currentTokenType
+    if (char !== '\n') {
+      currentTokenType = "inline code body"
+    }else if (token.length > 2) {
+      currentTokenType = "delimiter"
+    }else {
+      prevTokenType = "plain text"
+    }
+  }else if (currentTokenType !== "code delimiter start") {
+    prevTokenType = currentTokenType
+    currentTokenType = "code delimiter start"
+  }
+  return [prevTokenType, currentTokenType]
 }
 
 function changePrevTokensHighlightColor(index: number, highlightedCode: HTMLElement[]) {
@@ -281,112 +293,64 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let openedBacktick = "";
   let codeHighlight = false;
   let lineNum = 1;
-  let openedQuotesType = "" // stores the type of opened quotes (' or ") if any is encountered during the loop
-  let commentType = ""
   let normalParsing = false;
   let linkState: string|null = null;
   let codeBlock = false;
-  let codeBlockDelimiter: string|null = "";
 
   while (stringNotProcessed) {
     let char = ( i < text.length ? text[i] : "")
 
     let previousChar = i-1 >= 0 ? text[i-1] : "";
 
-    if (beginningOfLine && char && !codeHighlight) {
-      prevTokenType = currentTokenType
-      currentTokenType = getBlockElementType(char, currentTokenType as string)
-      if (!currentTokenType) {
-        normalParsing = true
-        currentTokenType = prevTokenType
-        prevTokenType = null
-      }
+    if (beginningOfLine && char) {
+      let blockElementTokenType = getBlockElementType(char, currentTokenType as string)
 
-      if (currentTokenType === prevTokenType) {
-        prevTokenType = null
-      }
+      if (blockElementTokenType) {
+        if (blockElementTokenType !== currentTokenType) {
+          prevTokenType = currentTokenType
+          currentTokenType = blockElementTokenType
+        }
+      }else normalParsing = true;
     }
 
     if (normalParsing && char) {
+      if (char === '`' && !codeHighlight) {
+        codeHighlight = true
+      }
       if (!codeHighlight && linkState !== "opened link address") {
-        if (linkState === "closed link text" && char !== '(') {
-          linkState = null
-        }
-        // token length will always be less than 2 if currenTokenType = "escape sequence"
-        if (currentTokenType !== "escape sequence" || token.length == 2) {
-          if (char === '`') {
-            prevTokenType = currentTokenType
-            currentTokenType = "code delimiter"
-            codeHighlight = true;
-          }else {
-            let nextChar = i+1<text.length ? text[i+1] : "";
-            [prevTokenType, currentTokenType, linkState] = getInlineElementTokenType(char, nextChar, linkState, currentTokenType)
-          }
-        }  
+        let nextChar = i+1<text.length ? text[i+1] : "";
+        [prevTokenType, currentTokenType, linkState] = getInlineElementTokenType(char, nextChar, linkState, currentTokenType)
       }else if (linkState === "opened link address") {
-        if (token === "(") {
-          prevTokenType = currentTokenType
-          currentTokenType = "link address";
-        }else if (char == ')') {
+        if (char == ')') {
           prevTokenType = currentTokenType
           currentTokenType = "link delimiter";
           linkState = null;
+        }else if (currentTokenType !== "link address") {
+          prevTokenType = currentTokenType
+          currentTokenType = "link address";
         }
-      }else if (codeHighlight && char) {
+      }else if (codeHighlight) {
         if (codeBlock) {
-          if (char === '\n') {
-            codeBlockDelimiter = ''
-          }else if (char === '`' && codeBlockDelimiter !== null) {
-            if (token + char === openedBacktick) {
-              currentTokenType = "code delimiter"
-              codeBlock = false
-              codeHighlight = false
-              openedBacktick = ""
-            }
-          }else codeBlockDelimiter = null;
-          if (codeBlock) {
-            [prevTokenType, currentTokenType] = getJsTokenType(char, token, currentTokenType)
-          } 
-        }else if (char === '`') {
-          if (currentTokenType === "inline code body") {
-            if (previousChar !== '`'){
-             prevTokenType = currentTokenType 
-            } 
-            if (char === openedBacktick || (token + char) === openedBacktick) { // at most 3 (```)
-              currentTokenType = "code delimiter"
-              codeHighlight = false
-              openedBacktick = ""
-            }
-          }
-        }else{
-          if (char === '\n') {
-            if (openedBacktick.length >= 2) {
-              if (currentTokenType === "inline code body" && token[0] !== '`') {
-                // only marks text like "```lang-name" as code type
-                currentTokenType = "code type"
-                codeBlock = true
-              }else {
-                // doesn't mark text like "```lang-name``" as code type
-                prevTokenType = currentTokenType
-                currentTokenType = "plain text"
-                codeHighlight = false
-              }
-            }else {
-              prevTokenType = currentTokenType
-              currentTokenType = "plain text"
-              codeHighlight = false
-            }
-          }else if (currentTokenType !== "inline code body"){
-            prevTokenType = currentTokenType
-            currentTokenType = "inline code body"
+          [prevTokenType, currentTokenType] = getJsTokenType(char, token, currentTokenType)
+        }else if (currentTokenType === "inline code body") {
+          [prevTokenType, currentTokenType] = getCodeEndDelimiterTokenType(char, openedBacktick, token, currentTokenType)
+        }else {
+          [prevTokenType, currentTokenType] = getCodeStartDelimiterTokenType(char, token, currentTokenType as any)
+          if (currentTokenType !== "code delimiter start") {
             openedBacktick = token
           }
+        }
+        if (currentTokenType === "code delimiter end" || prevTokenType === "plain text") {
+          codeHighlight = false
+          openedBacktick = ""
+        }else if (currentTokenType === "delimiter") {
+          codeBlock = true
         }
       }
     }
 
     if (char === '\n' && i !== text.length-1){ // there's sometimes a redundant new line at the end of text param
-      if (!codeBlock) {
+      if (!codeHighlight) {
         beginningOfLine = true;
         normalParsing = false;
       }
