@@ -86,8 +86,10 @@ function highlightedToken(tokenType:string, token:string) {
     return styleCode(token, "text-sky-600 underline")
   }else if (tokenType === "emphasis|strong") {
     return styleCode(token, "text-purple-400")
-  }else if (tokenType === "tag delimiter" || tokenType === "assignment" ) {
+  }else if (tokenType === "tag delimiter") {
     return styleCode(token, "text-gray-300")
+  }else if (tokenType === "html attr assignment") {
+    return styleCode(token, "text-cyan-200")
   }else if (tokenType === "tag name") {
     return styleCode(token, "text-red-400")
   }else if (tokenType === "inline code body") {
@@ -97,10 +99,10 @@ function highlightedToken(tokenType:string, token:string) {
   }else if (tokenType === "plain text" || tokenType === "escaped char") {
     return styleCode(token, "text-white")
   }else if (tokenType === "code type" || tokenType === "attribute name") {
-    return styleCode(token, "text-purple-300")
+    return styleCode(token, "text-purple-500")
   }else if (tokenType === "comment") {
     return styleCode(token, "text-gray-300")
-  }else if (tokenType === "string" || tokenType === "value") {
+  }else if (tokenType === "string" || tokenType === "value" || tokenType === "quoted value") {
     return styleCode(token, "text-green-300")
   }else if ( !isNaN(token * 0) && tokenType === 'unknown' ) { // todo: improve string is number check [2\\3 won't get parsed]
     return styleCode(token, "text-orange-300")
@@ -139,36 +141,115 @@ function getBlockElementType(char: string, currTokenType: string) {
   return currTokenType // incase current token type hasn't changed
 }
 
-function getInlineElementTokenType(char: string, nextChar: string, linkState: string | null, currTokenType: string | null) {
+function getHTMLTokenType(char: string, token: string, currTokenType: string|null) {
+  let prevTokenType: any = null
+  let endOfTag = false;
+
+  if (currTokenType === "tag delimiter") {
+    if (token === '>' || token === '/>') {
+      endOfTag = true;
+      prevTokenType = currTokenType
+    }else if ((/\w|\d/).test(char)) {
+      console.log([0, token, char])
+      if (token === '<' || token == '</') {
+        prevTokenType = currTokenType
+        currTokenType = "tag name"
+        console.log([char, 89])
+      }
+    }else if (char !== '/' || (char === '/' && token !== '<')) {
+      endOfTag = true;
+      currTokenType = "plain text"
+    }
+  }else if (currTokenType === "tag name" || currTokenType === "value") {
+    if (char === ' ') {
+      prevTokenType = currTokenType
+      currTokenType = "attribute name"
+    }
+  }else if (currTokenType === "html attr assignment") {
+    if (char !== '/' && char !== '>') { // currTokenType and PrevTokenType will still be modified if char is '/' or '>'
+      prevTokenType = currTokenType
+      currTokenType = "value"
+    }
+  }else if (currTokenType === "attribute name") {
+    if (char === '=') {
+      prevTokenType = currTokenType
+      currTokenType = "html attr assignment"
+    }
+  }else {
+    endOfTag = true
+    prevTokenType = currTokenType
+  }
+  return [prevTokenType, currTokenType, endOfTag];
+}
+
+
+function getInlineElementTokenType(char: string, token: string, linkState: string | null, currTokenType: string | null, inHTML: boolean) {
   if (linkState === "closed link text" && char !== '(') {
     linkState = null
   }
-
-  let prevTokenType = currTokenType;
-  if (char === '!' && nextChar === '[' && linkState !== "opened link text") {
-    currTokenType = "link delimiter"
-  }else if (char  === '[' && linkState !== "opened link text") {
-    if (currTokenType !== "link delimiter") {
-      currTokenType = "link delimiter"
+  let prevTokenType = null;
+  if (currTokenType === "value" && ("'\"").includes(token[0])) {
+    if (token.length === 1 || (token[0] !== token[token.length-1])) {
+      return [prevTokenType, currTokenType, linkState]
     }
-    linkState = "opened link text"
-  }else if (char === ']' && linkState === "opened link text") {
-    currTokenType = "link delimiter"
-    linkState = "closed link text"
-  }else if (char === '(' && linkState === "closed link text") {
-    linkState = "opened link address"
-  }else if (char === "*" || char === "_") {
-    if (currTokenType !== "emphasis|strong") {
-      currTokenType = "emphasis|strong"
-    }
-  }else if (char === '<' && (/\w|\//).test(nextChar)) {
-    currTokenType = "tag delimiter"
-  }else if (currTokenType !== "plain text") {
-    currTokenType = "plain text"
   }
+
+  prevTokenType = currTokenType;
+  let endOfTag = true;
+  
+  [prevTokenType, currTokenType, endOfTag] = getHTMLTokenType(char, token, currTokenType)
+
+  if (!inHTML && endOfTag) {
+    if (char === '!' && linkState !== "opened link text") {
+      if (token === '!') {
+        prevTokenType = "plain text"
+      }
+      currTokenType = "link delimiter"
+    }else if (char  === '[' && linkState !== "opened link text") {
+      if (currTokenType !== "link delimiter") {
+        currTokenType = "link delimiter"
+      }
+      linkState = "opened link text"
+    }else if (char === ']' && linkState === "opened link text") {
+      currTokenType = "link delimiter"
+      linkState = "closed link text"
+    }else if (char === '(' && linkState === "closed link text") {      
+      linkState = "opened link address"
+    }else if (char === "*" || char === "_") {
+      if (currTokenType !== "emphasis|strong") {
+        currTokenType = "emphasis|strong"
+      }
+    }else if (char !== '<' && currTokenType !== "plain text") {
+      currTokenType = "plain text"
+    }
+  }
+
   if (prevTokenType === currTokenType) {
     prevTokenType = null
   }
+
+  if (endOfTag) {
+    if (char === '<') { // won't highlight if followed by a '\n'. valid behaviour
+      if (token === '<') {
+        prevTokenType = "plain text"
+      }else prevTokenType = currTokenType;
+      currTokenType = "tag delimiter"
+    }else if (currTokenType === "tag delimiter") {
+      prevTokenType = currTokenType
+      currTokenType = "plain text"
+    }
+  }else { // single tag entity hasn't been closed by an appropriate delimiter
+    if (char === '/' && currTokenType !== "tag delimiter"){ // so it doesn't interfere with "</" types
+      prevTokenType = currTokenType
+      currTokenType = "attribute name"
+    }else if (char === '>') {
+      if (token !== '/') {
+        prevTokenType = currTokenType
+      }
+      currTokenType = "tag delimiter"
+    }
+  }
+
   return [prevTokenType, currTokenType, linkState]
 }
 
@@ -218,22 +299,8 @@ function getJsTokenType(char: string, token: string, currentTokenType: string | 
   return [prevTokenType, currentTokenType]
 }
 
-function getHtmlTokenType() {
-
-}
-
-function getCssTokenType() {
-
-}
-
-function getClangTokenType() {
-
-}
-    
-
 // TODO:
-// search for all keywords and operators
-// HTML, CSS
+// search for all keywords and operators of js
 // Tab key press as well as tab representation
 // new line on highlighted text
 
@@ -302,10 +369,10 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let normalParsing = false;
   let linkState: string|null = null;
   let codeBlock = false;
-  let openedHTMLTag = false;
-  let openedTagName = "";
-  let inTag = false;
+  let inHTML = false;
   let openingTag = false
+  let closingTag = false
+  let openedTags = []
 
   while (stringNotProcessed) {
     let char = ( i < text.length ? text[i] : "")
@@ -327,12 +394,34 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       if (char === '`' && !codeHighlight) {
         codeHighlight = true
       }
-      if (!codeHighlight && linkState !== "opened link address" && !openedHTMLTag) {
-        let nextChar = i+1<text.length ? text[i+1] : "";
-        [prevTokenType, currentTokenType, linkState] = getInlineElementTokenType(char, nextChar, linkState, currentTokenType)
+      if (!codeHighlight && linkState !== "opened link address") {
+        // let nextChar = i+1<text.length ? text[i+1] : "";
+        [prevTokenType, currentTokenType, linkState] = getInlineElementTokenType(char, token, linkState, currentTokenType, inHTML)
+        if (prevTokenType === "tag delimiter") {
+          if (token === '<') {
+            openingTag = true
+            inHTML = true
+          }else if (token === "</") {
+            closingTag = true
+          }
+        }else if (prevTokenType === "tag name") {
+          if (openingTag) {
+            openedTags.push(token.toLowerCase())
+            openingTag = false
+          }else if (closingTag) {
+            if (openedTags[openedTags.length-1] === token.toLowerCase()) {
+              openedTags.pop()
+              closingTag = false
+            }
+          }
+        }
         if (currentTokenType === "tag delimiter") {
-          openedHTMLTag = true;
-          inTag = true;
+          if (token + char === "/>") {
+            openedTags.pop()
+          }
+          if (openedTags.length === 0) {
+            inHTML = false
+          }
         }
       }else if (linkState === "opened link address") {
         if (char == ')') {
@@ -350,9 +439,6 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
           [prevTokenType, currentTokenType] = getCodeEndDelimiterTokenType(char, openedBacktick, token, currentTokenType)
         }else {
           [prevTokenType, currentTokenType] = getCodeStartDelimiterTokenType(char, token, currentTokenType as any)
-          if (currentTokenType !== "code delimiter start") {
-            openedBacktick = token
-          }
         }
         if (currentTokenType === "code delimiter end" || prevTokenType === "plain text") {
           codeHighlight = false
@@ -360,75 +446,11 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
         }else if (currentTokenType === "delimiter") {
           codeBlock = true
         }
-      }else if (openedHTMLTag) { // minimalistic html highlighter
-        let nextChar = i+1<text.length ? text[i+1] : "";
-        if (inTag) {
-          if (currentTokenType === "tag delimiter" && char !== '/') {
-            prevTokenType = currentTokenType
-            currentTokenType = "tag name"
-            if (token !== '<' && token !== '</') {
-              openedHTMLTag = false;
-            }else if (token === '<') {
-              openingTag = true
-            }
-          }
-          if (char === '>') {
-            inTag = false;
-            prevTokenType = currentTokenType
-            currentTokenType = "tag delimiter"
-            if (!openedTagName) {
-              openedTagName = token
-            }else if (openedTagName === token && !openingTag) {
-              openedHTMLTag = false;
-              inTag = false
-              openedTagName = ""
-            }
-          }else if (currentTokenType !== "value") {
-            if (char === "=" && currentTokenType !== "assignment") {
-              prevTokenType = currentTokenType
-              currentTokenType = "assignment"
-            }else if (currentTokenType === "assignment" && char !== ' ') {
-              prevTokenType = currentTokenType
-              currentTokenType = "value"
-            }
-          }else if (("\"'").includes(token[0])) {
-            if (token.length >  1 && token[0] === token[token.length-1]) {
-              prevTokenType = currentTokenType
-              currentTokenType = null
-            }
-          }
-          if (char === ' ' && currentTokenType !== "attribute name") {
-            if (currentTokenType === "value") {
-              if (!("\"'").includes(token[0])) {
-                prevTokenType = currentTokenType
-                currentTokenType = "attribute name"
-              }
-            }else if (currentTokenType === "assignment") {
-              prevTokenType = currentTokenType
-              currentTokenType = "value"
-            }else if (currentTokenType === "tag name") {
-              prevTokenType = currentTokenType
-              currentTokenType = "attribute name"
-              openedTagName = token
-              if (!openedTagName) {
-                openedTagName = token
-              }
-            }
-          }
-        }else if (char === '<' && (/\w|\//).test(nextChar)) {
-          prevTokenType = currentTokenType
-          currentTokenType = "tag delimiter"
-          inTag = true
-        }else if (currentTokenType !== "plain text") {
-          prevTokenType = currentTokenType
-          currentTokenType = "plain text"
-          openingTag = false
-        }
       }
     }
 
     if (char === '\n' && i !== text.length-1){ // there's sometimes a redundant new line at the end of text param
-      if (!codeHighlight && !openedHTMLTag) {
+      if (!codeHighlight && !inHTML) {
         beginningOfLine = true;
         normalParsing = false;
       }
