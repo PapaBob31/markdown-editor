@@ -15,30 +15,6 @@ const keywords = [
 ]
 const keywordsValues = ['true', 'false', 'null', 'undefined']
 
-// checks if a String has a comment starting at a given index in the string
-function checkForComment(text: string, index: number) {
-  if (text.startsWith(lineComment, index)) {
-    return lineComment
-  }else if (text.startsWith(multiLineCommentStart, index))  {
-    return multiLineCommentStart
-  }
-  return ""
-}
-
-/** checks for the end of a comment
- * @params {string} commentType: The type of comment e.g single line or multi-line
- * @params {string} char: Current Character that's about to marked as part of the comment
- * @params {string} token: The current comment body we have encountered so far.
- */
-function endOfComment(commentType: string, char: string, token: string) {
-  if (commentType === lineComment && char === '\n') {
-    return true
-  }else if (commentType === multiLineCommentStart && token.endsWith(multiLineCommentEnd)) { // optimise endsWith?
-    return true
-  }
-  return false
-}
-
 
 /** Checks for the token category a particular character falls into
  * @params {string} char: the target character
@@ -76,7 +52,7 @@ function styleCode(token: string, classStr: string) {
 function highlightedToken(tokenType:string, token:string) {
   if (tokenType === "block list" || tokenType === "block list 1"){
     return styleCode(token, "text-amber-500")
-  }else if (tokenType === "ordered list item" && (/^\d+\b\.$/).test(token)) {
+  }else if (tokenType === "ordered list item") {
     return styleCode(token, "text-amber-300")
   }else if (tokenType === "markdown delimiters" ){
     return styleCode(token, "")
@@ -117,15 +93,22 @@ function highlightedToken(tokenType:string, token:string) {
   }else return styleCode(token, "text-white")
 }
 
-
-function getBlockElementType(char: string, currTokenType: string) {
+// Checks if char parameter indicates an html block element
+// Returns current token type
+function getBlockElementType(char: string, token: string, currTokenType: string) {
   if (("-+#>=").includes(char)) {
     if (currTokenType !== 'block list') {
       return 'block list'
     }
-  }else if (("0123456789.").includes(char)){
-     if (currTokenType !== 'ordered list item') {
-      return 'ordered list item'
+  }else if (("0123456789.").includes(char)) {
+    if (char === '.' && !(/^\d+$/).test(token)) {
+      return null
+    }else if (char !== '.') {
+      if (currTokenType !== 'ordered list item') {
+        return 'ordered list item'
+      }else if ((/^\d+\.$/).test(token)) {
+        return null
+      }
     }
   }else if (char === '*') {
     if (currTokenType !== 'block list 1') {
@@ -150,11 +133,9 @@ function getHTMLTokenType(char: string, token: string, currTokenType: string|nul
       endOfTag = true;
       prevTokenType = currTokenType
     }else if ((/\w|\d/).test(char)) {
-      console.log([0, token, char])
       if (token === '<' || token == '</') {
         prevTokenType = currTokenType
         currTokenType = "tag name"
-        console.log([char, 89])
       }
     }else if (char !== '/' || (char === '/' && token !== '<')) {
       endOfTag = true;
@@ -253,10 +234,6 @@ function getInlineElementTokenType(char: string, token: string, linkState: strin
   return [prevTokenType, currTokenType, linkState]
 }
 
-function getPythonTokenType() {
-
-}
-
 function getJsTokenType(char: string, token: string, currentTokenType: string | null) {
   let prevTokenType = null
   let parseOthers = true
@@ -352,36 +329,58 @@ function changePrevTokensHighlightColor(index: number, highlightedCode: HTMLElem
   }
 }
 
+function getHTMLState(lastToken: string, token: string, currTokenType: string, prevTokenType: string, openedTags: string[]) {
+  let inHTML: boolean = openedTags.length > 0 
+
+  console.log(openedTags, currTokenType, token)
+  if (prevTokenType === "tag name") {
+    if (lastToken === '<') {
+      openedTags.push(token)
+    }else if (lastToken === '</') {
+      if (openedTags[openedTags.length - 1] === token.toLowerCase()) {
+        openedTags.pop()
+      }
+    }
+  }else if (token === "/>" && currTokenType === "tag delimiter") {
+    openedTags.pop()
+    console.log(openedTags)
+  }
+
+  if (openedTags.length === 0) {
+    inHTML = false
+  }
+  return inHTML
+}
 
 function highlightMarkDown(text: string, newCaretOffset: number) : any {
+
+  // variable storing a stream of consecutive characters from text that's a specific token type
   let token = "";
+
   let beginningOfLine = true
-  let stringNotProcessed = true
+  let stringNotProcessed = true // while loop control variable
+
+  /* Array that will be used to store all the tokens found in text parameter.
+  Each token would be nested in a code element that would be styled */
   let highlightedCode = [];
-  let i = 0;
+  let i = 0; // index for each character in text parameter
   let caretOffset = 0;
   let caretElement = null;
-  let currentTokenType = null;
-  let prevTokenType = null;
+  let currentTokenType = null; // token type of the current token
+  let prevTokenType = null; // come back to comment
   let openedBacktick = "";
   let codeHighlight = false;
   let lineNum = 1;
   let normalParsing = false;
   let linkState: string|null = null;
   let codeBlock = false;
-  let inHTML = false;
-  let openingTag = false
-  let closingTag = false
-  let openedTags = []
+  let openedTags: string[] = [];
 
   while (stringNotProcessed) {
-    let char = ( i < text.length ? text[i] : "")
-
-    let previousChar = i-1 >= 0 ? text[i-1] : "";
+    let char = ( i < text.length ? text[i] : "") //
 
     if (beginningOfLine && char) {
-      let blockElementTokenType = getBlockElementType(char, currentTokenType as string)
-
+      let blockElementTokenType = getBlockElementType(char, token, currentTokenType as string)
       if (blockElementTokenType) {
         if (blockElementTokenType !== currentTokenType) {
           prevTokenType = currentTokenType
@@ -395,34 +394,9 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
         codeHighlight = true
       }
       if (!codeHighlight && linkState !== "opened link address") {
-        // let nextChar = i+1<text.length ? text[i+1] : "";
-        [prevTokenType, currentTokenType, linkState] = getInlineElementTokenType(char, token, linkState, currentTokenType, inHTML)
-        if (prevTokenType === "tag delimiter") {
-          if (token === '<') {
-            openingTag = true
-            inHTML = true
-          }else if (token === "</") {
-            closingTag = true
-          }
-        }else if (prevTokenType === "tag name") {
-          if (openingTag) {
-            openedTags.push(token.toLowerCase())
-            openingTag = false
-          }else if (closingTag) {
-            if (openedTags[openedTags.length-1] === token.toLowerCase()) {
-              openedTags.pop()
-              closingTag = false
-            }
-          }
-        }
-        if (currentTokenType === "tag delimiter") {
-          if (token + char === "/>") {
-            openedTags.pop()
-          }
-          if (openedTags.length === 0) {
-            inHTML = false
-          }
-        }
+        [prevTokenType, currentTokenType, linkState] = getInlineElementTokenType(char, token, linkState, currentTokenType, openedTags.length)
+        const tokenBefore = highlightedCode.length > 0 ? highlightedCode[highlightedCode.length - 1].textContent : ""
+        getHTMLState(tokenBefore, token, currentTokenType, prevTokenType, openedTags);
       }else if (linkState === "opened link address") {
         if (char == ')') {
           prevTokenType = currentTokenType
@@ -450,7 +424,7 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
     }
 
     if (char === '\n' && i !== text.length-1){ // there's sometimes a redundant new line at the end of text param
-      if (!codeHighlight && !inHTML) {
+      if (!codeHighlight && openedTags.length === 0) {
         beginningOfLine = true;
         normalParsing = false;
       }
@@ -468,13 +442,9 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       let lti = highlightedCode.length - 1 // lastTokenIndex
 
       if (prevTokenType === "delimiter") {
-        // potential bug?
         if (token.trimStart()[0] === "(" && highlightedCode[lti].classList.contains("text-white")) { 
           highlightedCode[lti].classList.replace("text-white", "text-sky-500")
         }
-      }else if (prevTokenType === "ordered list item" && !(/^\d+\b\.$/).test(token)) {
-        prevTokenType = "unknown"
-        normalParsing = true;
       }
       highlightedCode.push(highlightedToken(prevTokenType, token))
 
