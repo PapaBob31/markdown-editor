@@ -63,9 +63,9 @@ function highlightedToken(tokenType:string, token:string) {
   }else if (tokenType === "emphasis|strong") {
     return styleCode(token, "text-purple-400")
   }else if (tokenType === "tag delimiter") {
-    return styleCode(token, "text-gray-300")
+    return styleCode(token, "text-sky-200")
   }else if (tokenType === "html attr assignment") {
-    return styleCode(token, "text-cyan-200")
+    return styleCode(token, "text-gray-200")
   }else if (tokenType === "tag name") {
     return styleCode(token, "text-red-400")
   }else if (tokenType === "inline code body") {
@@ -75,7 +75,7 @@ function highlightedToken(tokenType:string, token:string) {
   }else if (tokenType === "plain text" || tokenType === "escaped char") {
     return styleCode(token, "text-white")
   }else if (tokenType === "code type" || tokenType === "attribute name") {
-    return styleCode(token, "text-purple-500")
+    return styleCode(token, "text-purple-400")
   }else if (tokenType === "comment") {
     return styleCode(token, "text-gray-300")
   }else if (tokenType === "string" || tokenType === "value" || tokenType === "quoted value") {
@@ -95,33 +95,37 @@ function highlightedToken(tokenType:string, token:string) {
 
 // Checks if char parameter indicates an html block element
 // Returns current token type
-function getBlockElementType(char: string, token: string, currTokenType: string) {
+function getTokenTypeIfBlockElement(char: string, token: string, currTokenType: string) {
+  let prevTokenType: any = currTokenType;
+  let normalParsing = false;
   if (("-+#>=").includes(char)) {
     if (currTokenType !== 'block list') {
-      return 'block list'
+      currTokenType = 'block list'
     }
   }else if (("0123456789.").includes(char)) {
     if (char === '.' && !(/^\d+$/).test(token)) {
-      return null
+      normalParsing = true;
     }else if (char !== '.') {
       if (currTokenType !== 'ordered list item') {
-        return 'ordered list item'
+        currTokenType = 'ordered list item'
       }else if ((/^\d+\.$/).test(token)) {
-        return null
+        normalParsing = true;
       }
     }
   }else if (char === '*') {
     if (currTokenType !== 'block list 1') {
-      return 'block list 1'
+      currTokenType = 'block list 1'
     }
   }else if (char === " " || char === "\n"){
     if (currTokenType !== 'markdown delimiters') {
-      return 'markdown delimiters'
+      currTokenType = 'markdown delimiters'
     }
   }else {
-    return null
+    normalParsing = true;
   }
-  return currTokenType // incase current token type hasn't changed
+  prevTokenType = (prevTokenType === currTokenType) ? null : prevTokenType;
+
+  return [prevTokenType, currTokenType, normalParsing]
 }
 
 function getHTMLTokenType(char: string, token: string, currTokenType: string|null) {
@@ -329,10 +333,19 @@ function changePrevTokensHighlightColor(index: number, highlightedCode: HTMLElem
   }
 }
 
+function changeCurrentTokenType(token: string) {
+  let currentTokenType = ""
+  if (token[0] === "*") {
+    currentTokenType = "emphasis|strong"
+  }else {
+    currentTokenType = "plain text"
+  }
+  return currentTokenType;
+}
+
 function getHTMLState(lastToken: string, token: string, currTokenType: string, prevTokenType: string, openedTags: string[]) {
   let inHTML: boolean = openedTags.length > 0 
 
-  console.log(openedTags, currTokenType, token)
   if (prevTokenType === "tag name") {
     if (lastToken === '<') {
       openedTags.push(token)
@@ -343,7 +356,6 @@ function getHTMLState(lastToken: string, token: string, currTokenType: string, p
     }
   }else if (token === "/>" && currTokenType === "tag delimiter") {
     openedTags.pop()
-    console.log(openedTags)
   }
 
   if (openedTags.length === 0) {
@@ -356,10 +368,7 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
 
   // variable storing a stream of consecutive characters from text that's a specific token type
   let token = "";
-
   let beginningOfLine = true
-  let stringNotProcessed = true // while loop control variable
-
   /* Array that will be used to store all the tokens found in text parameter.
   Each token would be nested in a code element that would be styled */
   let highlightedCode = [];
@@ -376,20 +385,19 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let codeBlock = false;
   let openedTags: string[] = [];
 
-  while (stringNotProcessed) {
-    let char = ( i < text.length ? text[i] : "") //
+  while (i <= text.length) {
+    let char = ( i < text.length ? text[i] : "");
 
-    if (beginningOfLine && char) {
-      let blockElementTokenType = getBlockElementType(char, token, currentTokenType as string)
-      if (blockElementTokenType) {
-        if (blockElementTokenType !== currentTokenType) {
-          prevTokenType = currentTokenType
-          currentTokenType = blockElementTokenType
-        }
-      }else normalParsing = true;
+    if (beginningOfLine && char){
+      [prevTokenType, currentTokenType, normalParsing] = getTokenTypeIfBlockElement(char, token, currentTokenType as string)
     }
 
     if (normalParsing && char) {
+      if (beginningOfLine){
+        currentTokenType = changeCurrentTokenType(token);
+        changePrevTokensHighlightColor(highlightedCode.length-1, highlightedCode);
+        beginningOfLine = false
+      }
       if (char === '`' && !codeHighlight) {
         codeHighlight = true
       }
@@ -423,7 +431,7 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       }
     }
 
-    if (char === '\n' && i !== text.length-1){ // there's sometimes a redundant new line at the end of text param
+    if (char === '\n' && i !== text.length-1) { // there's sometimes a redundant new line at the end of text param
       if (!codeHighlight && openedTags.length === 0) {
         beginningOfLine = true;
         normalParsing = false;
@@ -431,26 +439,18 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       lineNum++
     }
 
-    if (i === text.length) { // last iteration
-      if (currentTokenType) {
-        prevTokenType = currentTokenType
-      }
-      stringNotProcessed = false;
+    if (currentTokenType && !char) {
+      prevTokenType = currentTokenType
     }
 
     if (prevTokenType) {
       let lti = highlightedCode.length - 1 // lastTokenIndex
-
       if (prevTokenType === "delimiter") {
         if (token.trimStart()[0] === "(" && highlightedCode[lti].classList.contains("text-white")) { 
           highlightedCode[lti].classList.replace("text-white", "text-sky-500")
         }
       }
       highlightedCode.push(highlightedToken(prevTokenType, token))
-
-      if (normalParsing && beginningOfLine) {
-        changePrevTokensHighlightColor(lti+1, highlightedCode)  
-      }
       if (i >= newCaretOffset && !caretElement) {
         caretElement = highlightedCode[lti+1]
         caretOffset = caretElement.innerText.length - (i - newCaretOffset)
@@ -458,10 +458,7 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       token = ""
       prevTokenType = null;
     }
-    if (normalParsing && beginningOfLine) {
-      beginningOfLine = false;
-    }
-    token += char 
+    token += char
     i++
   }
   return [highlightedCode, lineNum, caretElement, caretOffset]
@@ -503,7 +500,7 @@ export default function CodeEditor() {
       let [htmlTextList, updatedNumber, caretElement, newCaretOffset] = highlightMarkDown(localValue.current, caretOffset)
       event.target.innerHTML = ""
       event.target.append(...htmlTextList)
-      // setNumberOfLines(updatedNumber)
+      setNumberOfLines(updatedNumber)
       moveCaretToNewPosition(newCaretOffset, caretElement.firstChild)
     }
   }
@@ -521,14 +518,14 @@ export default function CodeEditor() {
     let [htmlTextList, updatedNumber, caretElement, newCaretOffset] = highlightMarkDown(localValue.current, caretOffset)
     event.target.innerHTML = ""
     event.target.append(...htmlTextList)
-    // setNumberOfLines(updatedNumber)
+    setNumberOfLines(updatedNumber)
     moveCaretToNewPosition(newCaretOffset, caretElement.firstChild)
   }
 
   return (
     <section className="overflow-x-auto bg-slate-700">
       <div className="flex">
-      {/*<div className="text-gray-200 px-2 leading-tight">{generateNumForLines()}</div>*/}
+      <div className="text-gray-200 px-2 leading-tight">{generateNumForLines()}</div>
        {/*pre element's content isn't stored in state because Component's with `contentEditable` can't contain `children` managed by React*/} 
        <pre contentEditable spellCheck="false" onInput={reStyleCode} ref={preElement} onKeyDown={interceptEnterKey}
         className="block leading-tight text-white pl-2 caret-amber-600 outline-none flex-grow">
