@@ -1,12 +1,15 @@
 export function getCurrentCaretPosition(focusedElement: HTMLElement) {
   let selection = window.getSelection() as any
+  let selectedContentLength = selection.toString().replaceAll("\r","").length
+  selection.collapseToStart()
+
   let range = selection.getRangeAt(0)
   range.setStart(focusedElement, 0)
   selection.addRange(range)
   let caretOffset = selection.toString().replaceAll("\r","").length
   selection.collapseToEnd()
   range.collapse()
-  return caretOffset
+  return [caretOffset, selectedContentLength]
 }
 
 export function moveCaretToNewPosition(newCaretOffset: number, textNode: HTMLElement) {

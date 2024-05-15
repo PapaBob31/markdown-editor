@@ -3,8 +3,8 @@
 import React, { useEffect, useState, useRef } from "react"
 import { getCurrentCaretPosition, moveCaretToNewPosition } from "../utilities"
 
-const operators = ["...", "in", "new", '+', '!', '?', '%', '-', '/', '*', '^', '|', '&', '=', '<', '>']
-const delimiters = " :.;,(){}[]\n\t"
+const operators = ["...", "in", "new", '~', '+', '!', '?', '%', '-', '/', '*', '^', '|', '&', '=', '<', '>']
+const delimiters = ":.;,(){}[]\n\t"
 const numbers = "0123456789"
 const lineComment = "//"
 const multiLineCommentStart = "/*"
@@ -15,7 +15,6 @@ const keywords = [
 ]
 const keywordsValues = ['true', 'false', 'null', 'undefined']
 
-
 /** Checks for the token category a particular character falls into
  * @params {string} char: the target character
  * @params {string} currentTokenType: the token category the previous set of [one or more] characters before it falls into
@@ -25,7 +24,9 @@ function checkTokenType(char: string, currentTokenType: string) {
 
   if (delimiters.includes(char)) {
     if (currentTokenType !== 'delimiter') { // the characters before and the current character are of different token types
-      prevTokenType = currentTokenType // indicates that the current token type have changed
+      if (char === '(' && currentTokenType === "unknown") {
+        prevTokenType = "possible function call"
+      }else prevTokenType = currentTokenType // indicates that the current token type have changed
       currentTokenType = 'delimiter'
     }
   }else if (operators.includes(char)) {
@@ -82,14 +83,16 @@ function highlightedToken(tokenType:string, token:string) {
     return styleCode(token, "text-green-300")
   }else if ( !isNaN(token * 0) && tokenType === 'unknown' ) { // todo: improve string is number check [2\\3 won't get parsed]
     return styleCode(token, "text-orange-300")
-  }else if (keywords.includes(token)) {
+  }else if (keywords.includes(token.trimRight())) {
     return styleCode(token, "text-purple-400")
-  }else if (keywordsValues.includes(token)) {
+  }else if (keywordsValues.includes(token.trimRight())) {
     return styleCode(token,"text-red-400" )
   }else if (tokenType === "operator" || operators.includes(token.trim())) {
     return styleCode(token, "text-amber-500")
   }else if (tokenType === "delimiter") {
     return styleCode(token, "text-zinc-200")
+  }else if (tokenType === "possible function call" && !(/^[\d#]/).test(token)) {
+    return styleCode(token, "text-sky-500")
   }else return styleCode(token, "text-white")
 }
 
@@ -276,6 +279,12 @@ function getJsTokenType(char: string, token: string, currentTokenType: string | 
   }
   if (parseOthers && char) {
     [prevTokenType, currentTokenType] = checkTokenType(char, currentTokenType as string)
+
+    if (char !== " " && token[token.length-1] === " ") {
+      if (currentTokenType === "unknown") {
+        prevTokenType = currentTokenType
+      }
+    }
   }
   return [prevTokenType, currentTokenType]
 }
@@ -444,15 +453,10 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
     }
 
     if (prevTokenType) {
-      let lti = highlightedCode.length - 1 // lastTokenIndex
-      if (prevTokenType === "delimiter") {
-        if (token.trimStart()[0] === "(" && highlightedCode[lti].classList.contains("text-white")) { 
-          highlightedCode[lti].classList.replace("text-white", "text-sky-500")
-        }
-      }
       highlightedCode.push(highlightedToken(prevTokenType, token))
+      let lti = highlightedCode.length - 1 // lastTokenIndex
       if (i >= newCaretOffset && !caretElement) {
-        caretElement = highlightedCode[lti+1]
+        caretElement = highlightedCode[lti]
         caretOffset = caretElement.innerText.length - (i - newCaretOffset)
       }
       token = ""
@@ -484,14 +488,15 @@ export default function CodeEditor() {
   function interceptEnterKey(event: React.KeyboardEvent){
     if (event.key === "Enter") {
       event.preventDefault()
-      let caretOffset = getCurrentCaretPosition(event.target as HTMLElement)
+      let [caretOffset, selectedTextLength] = getCurrentCaretPosition(event.target as HTMLElement)
       if (localValue.current === "") {
         /*I don't use innertext because different browsers implement different behaviours with innerText. For example:
         getting innerText after Enter Key press on empty contentEditable Element return '\n\n\n' in chrome but '\n\n' in firefox*/
         localValue.current = '\n\n'
       }else {
         // Again, This is done cause of different browser behaviour concerning innerText when new line is encountered
-        localValue.current = localValue.current.slice(0, caretOffset) + "\n" + localValue.current.slice(caretOffset, localValue.current.length)
+        let stl = selectedTextLength
+        localValue.current = localValue.current.slice(0, caretOffset) + "\n" + localValue.current.slice(caretOffset+stl, localValue.current.length)
       }
       caretOffset++
       if (caretOffset === localValue.current.length) {
@@ -506,7 +511,7 @@ export default function CodeEditor() {
   }
 
   function reStyleCode(event) {
-    let caretOffset = getCurrentCaretPosition(event.target)
+    let [caretOffset, selectedTextLength] = getCurrentCaretPosition(event.target)
     let inputLen = event.target.innerText.length
     if (event.target.innerText[inputLen-1] === "\n") {
       // some browsers [chrome] append unneeded newline char to their innerText attribute.
