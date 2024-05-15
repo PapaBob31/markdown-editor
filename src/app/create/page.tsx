@@ -51,7 +51,9 @@ function styleCode(token: string, classStr: string) {
 
 // Generates a CODE HTML Element with a unique styling for a specific token type
 function highlightedToken(tokenType:string, token:string) {
-  if (tokenType === "block list" || tokenType === "block list 1"){
+  if (tokenType === "escape sequence") {
+    return styleCode(token, "text-pink-300")
+  }else if (tokenType === "block list" || tokenType === "block list 1"){
     return styleCode(token, "text-amber-500")
   }else if (tokenType === "ordered list item") {
     return styleCode(token, "text-amber-300")
@@ -73,14 +75,14 @@ function highlightedToken(tokenType:string, token:string) {
     return styleCode(token, "text-white bg-slate-600")
   }else if (tokenType === "code delimiter start" || tokenType === "code delimiter end"){
     return styleCode(token, "text-slate-400")
-  }else if (tokenType === "plain text" || tokenType === "escaped char") {
+  }else if (tokenType === "plain text") {
     return styleCode(token, "text-white")
   }else if (tokenType === "code type" || tokenType === "attribute name") {
     return styleCode(token, "text-purple-400")
   }else if (tokenType === "comment") {
     return styleCode(token, "text-gray-300")
-  }else if (tokenType === "string" || tokenType === "value" || tokenType === "quoted value") {
-    return styleCode(token, "text-green-300")
+  }else if (tokenType === "string" || tokenType === "value") {
+    return styleCode(token, "text-green-400")
   }else if ( !isNaN(token * 0) && tokenType === 'unknown' ) { // todo: improve string is number check [2\\3 won't get parsed]
     return styleCode(token, "text-orange-300")
   }else if (keywords.includes(token.trimRight())) {
@@ -101,7 +103,11 @@ function highlightedToken(tokenType:string, token:string) {
 function getTokenTypeIfBlockElement(char: string, token: string, currTokenType: string) {
   let prevTokenType: any = currTokenType;
   let normalParsing = false;
-  if (("-+#>=").includes(char)) {
+
+  if (token.length === 2 && prevTokenType === 'escape sequence') {
+    normalParsing = true
+    return [prevTokenType, currTokenType, normalParsing]
+  }else if (("-+#>=").includes(char)) {
     if (currTokenType !== 'block list') {
       currTokenType = 'block list'
     }
@@ -128,6 +134,16 @@ function getTokenTypeIfBlockElement(char: string, token: string, currTokenType: 
   }
   prevTokenType = (prevTokenType === currTokenType) ? null : prevTokenType;
 
+  if (char === '\\' && token !== '\\') {
+    prevTokenType = currTokenType
+    currTokenType = "escape sequence"
+    normalParsing = false
+  }else if (token === '\\') {
+    if (!normalParsing) {
+      prevTokenType = null
+      currTokenType = "escape sequence"
+    }
+  }
   return [prevTokenType, currTokenType, normalParsing]
 }
 
@@ -207,7 +223,7 @@ function getInlineElementTokenType(char: string, token: string, linkState: strin
       if (currTokenType !== "emphasis|strong") {
         currTokenType = "emphasis|strong"
       }
-    }else if (char !== '<' && currTokenType !== "plain text") {
+    }else if (!('<\\').includes(char) && currTokenType !== "plain text") {
       currTokenType = "plain text"
     }
   }
@@ -238,61 +254,79 @@ function getInlineElementTokenType(char: string, token: string, linkState: strin
     }
   }
 
+  if (!inHTML) {
+    if (char === '\\' && token !== '\\') {
+      prevTokenType = currTokenType
+      currTokenType = "escape sequence"
+    }else if (token === '\\') {
+      prevTokenType = null
+      if (currTokenType !== "plain text") {      
+        currTokenType = "escape sequence"
+        linkState = null; // just in case
+      }
+    }
+  }
   return [prevTokenType, currTokenType, linkState]
 }
 
-function getJsTokenType(char: string, token: string, currentTokenType: string | null) {
+function getJsTokenType(char: string, token: string, currentTokenType: string | null, state: any) {
   let prevTokenType = null
-  let parseOthers = true
+
+  if (currentTokenType === "escape sequence" && token.length < 2) {
+    return [prevTokenType, currentTokenType, state]
+  }else if (currentTokenType === "escape sequence" && token.length === 2) {
+    prevTokenType = currentTokenType
+    currentTokenType = "string"
+  }
+
   if (currentTokenType === "comment") {
-    parseOthers = false
-    if (token.slice(0, 2) === "/*" && token.slice(token.length-2, token.length) === "*/") {
-      parseOthers = true
-    }else if (token.slice(0, 2) === '//' && char === '\n') {
-      parseOthers = true
+    if (state.openedComment === "/*" && token.slice(token.length-2, token.length) === "*/") {
+      state.openedComment = ""
+    }else if (state.openedComment === '//' && char === '\n') {
+      state.openedComment = ""
     }
-  }else {
-    if (token[0] === '"' || token[0] === "'" || token[0] === "`") {
-      parseOthers = false
-      if (token.length > 1 && token[0] === token[token.length-1]){
-        parseOthers = true      }
+  }else if (currentTokenType === "string") {
+    if (token.length === 1 && !state.openedStringDelimiter) {
+      state.openedStringDelimiter = token
+    }else if (token[token.length - 1] === state.openedStringDelimiter) {
+      if (!prevTokenType) { // so we can escape string literal marks=ers
+        state.openedStringDelimiter = ""
+      } 
     }
 
-    if (char === '\n' && (token[0] === '"' || token[0] === "'")) {
-      parseOthers = true
+    if (char === '\\') {
+      prevTokenType = currentTokenType
+      currentTokenType = "escape sequence"
+    }
+
+    if (char === '\n' && (state.openedStringDelimiter === '"' || state.openedStringDelimiter === "'")) {
+      state.openedStringDelimiter = ""
     }
   }
 
-  if (currentTokenType !== "comment" && currentTokenType !== "string") {
+  if (!state.openedComment && !state.openedStringDelimiter) {
     if (token === '//' || token === '/*'){
       currentTokenType = "comment"
-      parseOthers = false
+      state.openedComment = token
     }else if (char === '"' || char === "'" || char === "`") {
       prevTokenType = currentTokenType
       currentTokenType = "string"
-      parseOthers = false
     }else if ((char === '/' || char === '*') && token){
       if (token.length > 1 || token[0] !== '/') {
         prevTokenType = currentTokenType
       }
+    }else {
+      [prevTokenType, currentTokenType] = checkTokenType(char, currentTokenType as string)
     }
-  }
-  if (parseOthers && char) {
-    [prevTokenType, currentTokenType] = checkTokenType(char, currentTokenType as string)
+  } 
 
-    if (char !== " " && token[token.length-1] === " ") {
-      if (currentTokenType === "unknown") {
-        prevTokenType = currentTokenType
-      }
+  if (char !== " " && token[token.length-1] === " ") {
+    if (currentTokenType === "unknown") {
+      prevTokenType = currentTokenType
     }
   }
-  return [prevTokenType, currentTokenType]
+  return [prevTokenType, currentTokenType, state]
 }
-
-// TODO:
-// search for all keywords and operators of js
-// Tab key press as well as tab representation
-// new line on highlighted text
 
 function getCodeEndDelimiterTokenType(char: string, openedBacktick: string, token: string, currentTokenType: string) {
   let prevTokenType = null
@@ -346,9 +380,9 @@ function changeCurrentTokenType(token: string) {
   let currentTokenType = ""
   if (token[0] === "*") {
     currentTokenType = "emphasis|strong"
-  }else {
-    currentTokenType = "plain text"
-  }
+  }else if (token[0] === '\\'){
+    currentTokenType = "escape sequence"
+  }else currentTokenType = "plain text"
   return currentTokenType;
 }
 
@@ -393,6 +427,7 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let linkState: string|null = null;
   let codeBlock = false;
   let openedTags: string[] = [];
+  let codeBlockState: any = {openedComment: "", openedStringDelimiter: ""}
 
   while (i <= text.length) {
     let char = ( i < text.length ? text[i] : "");
@@ -425,7 +460,7 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
         }
       }else if (codeHighlight) {
         if (codeBlock) {
-          [prevTokenType, currentTokenType] = getJsTokenType(char, token, currentTokenType)
+          [prevTokenType, currentTokenType, codeBlockState] = getJsTokenType(char, token, currentTokenType, codeBlockState)
         }else if (currentTokenType === "inline code body") {
           [prevTokenType, currentTokenType] = getCodeEndDelimiterTokenType(char, openedBacktick, token, currentTokenType)
         }else {
