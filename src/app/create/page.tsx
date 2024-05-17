@@ -23,20 +23,20 @@ function checkTokenType(char: string, currentTokenType: string) {
   let prevTokenType = null
 
   if (delimiters.includes(char)) {
-    if (currentTokenType !== 'delimiter') { // the characters before and the current character are of different token types
+    if (currentTokenType !== 'delimiter') {
       if (char === '(' && currentTokenType === "unknown") {
         prevTokenType = "possible function call"
-      }else prevTokenType = currentTokenType // indicates that the current token type have changed
+      }else prevTokenType = currentTokenType
       currentTokenType = 'delimiter'
     }
   }else if (operators.includes(char)) {
-    if (currentTokenType !== 'operator') { // the characters before and the current character are of different token types
-      prevTokenType = currentTokenType // indicates that the current token type have changed
+    if (currentTokenType !== 'operator') {
+      prevTokenType = currentTokenType
       currentTokenType = 'operator'
     }
-  }else if (currentTokenType !== 'unknown') { // the characters before and the current character are of different token types
-    prevTokenType = currentTokenType // indicates that the current token type have changed
-    currentTokenType = 'unknown' // We can't detect the token type yet
+  }else if (currentTokenType !== 'unknown') {
+    prevTokenType = currentTokenType
+    currentTokenType = 'unknown'
   }
   return [prevTokenType, currentTokenType]
 }
@@ -386,53 +386,51 @@ function changeCurrentTokenType(token: string) {
   return currentTokenType;
 }
 
-function getHTMLState(lastToken: string, token: string, currTokenType: string, prevTokenType: string, openedTags: string[]) {
-  let inHTML: boolean = openedTags.length > 0 
-
+// updates the state of openedTags
+function getOpenedHTMLTagsInfo(tagDelimiter: string, token: string, prevTokenType: string, openedTags: string[]) {
   if (prevTokenType === "tag name") {
-    if (lastToken === '<') {
-      openedTags.push(token)
-    }else if (lastToken === '</') {
-      if (openedTags[openedTags.length - 1] === token.toLowerCase()) {
-        openedTags.pop()
+    if (tagDelimiter === '<') { // token is an opened html tag name
+      openedTags.push(token.toLowerCase()) // so we can easily detect later if the tag has been closed
+    }else if (tagDelimiter === '</') {
+      if (openedTags[openedTags.length - 1] === token.toLowerCase()) { // tag names are case insesitive
+        openedTags.pop() // removes the opened tag from the array
       }
     }
-  }else if (token === "/>" && currTokenType === "tag delimiter") {
-    openedTags.pop()
+  }else if (tagDelimiter === "/>") {
+    openedTags.pop() // removes the last void tag that was classified as an opened tag 
   }
 
-  if (openedTags.length === 0) {
-    inHTML = false
-  }
-  return inHTML
+  return openedTags
 }
 
 function highlightMarkDown(text: string, newCaretOffset: number) : any {
-
-  // variable storing a stream of consecutive characters from text that's a specific token type
-  let token = "";
-  let beginningOfLine = true
-  /* Array that will be used to store all the tokens found in text parameter.
-  Each token would be nested in a code element that would be styled */
+  let token = ""; // stores a lexical token
+  let beginningOfLine = true // some tokens fall into a specific category when found at the beginning of a line
   let highlightedCode = [];
-  let i = 0; // index for each character in text parameter
+  let i = 0;
   let caretOffset = 0;
   let caretElement = null;
-  let currentTokenType = null; // token type of the current token
-  let prevTokenType = null; // come back to comment
-  let openedBacktick = "";
+  let currentTokenType = null; // category of the current token
+
+  /* Used to indicate a switch in current token category. It does this by storing
+    the previous token category once a new token category is found */
+  let prevTokenType = null;
+
+  let openedBacktick = ""; // stores code block delimiter
   let codeHighlight = false;
   let lineNum = 1;
   let normalParsing = false;
   let linkState: string|null = null;
   let codeBlock = false;
-  let openedTags: string[] = [];
+  let openedTags: string[] = []; // stores the name of all opened tags when html is used in markdown.
+  let openTagDelimiter = ""
   let codeBlockState: any = {openedComment: "", openedStringDelimiter: ""}
 
   while (i <= text.length) {
+    // i would be greater than text.length on last iteration of the loop
     let char = ( i < text.length ? text[i] : "");
 
-    if (beginningOfLine && char){
+    if (beginningOfLine && char) {
       [prevTokenType, currentTokenType, normalParsing] = getTokenTypeIfBlockElement(char, token, currentTokenType as string)
     }
 
@@ -447,18 +445,20 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       }
       if (!codeHighlight && linkState !== "opened link address") {
         [prevTokenType, currentTokenType, linkState] = getInlineElementTokenType(char, token, linkState, currentTokenType, openedTags.length)
-        const tokenBefore = highlightedCode.length > 0 ? highlightedCode[highlightedCode.length - 1].textContent : ""
-        getHTMLState(tokenBefore, token, currentTokenType, prevTokenType, openedTags);
-      }else if (linkState === "opened link address") {
-        if (char == ')') {
+        openedTags = getOpenedHTMLTagsInfo(openTagDelimiter, token, prevTokenType, openedTags);
+
+      }else if (linkState === "opened link address") { // link address token category has been found
+        // every character including special characters and excluding ')' should be considered part of the category
+
+        if (char == ')') { // link delimiter token category was just found
           prevTokenType = currentTokenType
           currentTokenType = "link delimiter";
           linkState = null;
-        }else if (currentTokenType !== "link address") {
+        }else if (currentTokenType !== "link address") { // Prevents switching category from link address to link address
           prevTokenType = currentTokenType
           currentTokenType = "link address";
         }
-      }else if (codeHighlight) {
+      }else if (codeHighlight) { // char is currently in a code container according to the syntax of markdown
         if (codeBlock) {
           [prevTokenType, currentTokenType, codeBlockState] = getJsTokenType(char, token, currentTokenType, codeBlockState)
         }else if (currentTokenType === "inline code body") {
@@ -475,7 +475,9 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       }
     }
 
-    if (char === '\n' && i !== text.length-1) { // there's sometimes a redundant new line at the end of text param
+    /* The last index of text was checked cause there's sometimes a 
+     redundant new line at the end of text param*/
+    if (char === '\n' && i !== text.length-1) {
       if (!codeHighlight && openedTags.length === 0) {
         beginningOfLine = true;
         normalParsing = false;
@@ -483,18 +485,23 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       lineNum++
     }
 
-    if (currentTokenType && !char) {
+    if (currentTokenType && !char) { // we are done iterating through the text
+      // Stores currentTokenType's content so the current token can be highlighted 
       prevTokenType = currentTokenType
     }
 
-    if (prevTokenType) {
+    if (prevTokenType) { // The start of a new token was just found.
+
+      // highlights the token and stores the result in highlightedCode
       highlightedCode.push(highlightedToken(prevTokenType, token))
+
       let lti = highlightedCode.length - 1 // lastTokenIndex
       if (i >= newCaretOffset && !caretElement) {
         caretElement = highlightedCode[lti]
         caretOffset = caretElement.innerText.length - (i - newCaretOffset)
       }
-      token = ""
+      openTagDelimiter = (prevTokenType === "tag delimiter" ? token : openTagDelimiter);
+      token = "" // since a new token was just found, content is no longer needed after highlighting
       prevTokenType = null;
     }
     token += char
