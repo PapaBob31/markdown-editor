@@ -1,407 +1,13 @@
 "use client"
 
-import React, { useEffect, useState, useRef } from "react"
+import React, { useState, useRef } from "react"
 import { getCurrentCaretPosition, moveCaretToNewPosition } from "../utilities"
-
-const operators = ["...", "in", "new", '~', '+', '!', '?', '%', '-', '/', '*', '^', '|', '&', '=', '<', '>']
-const delimiters = ":.;,(){}[]\n\t"
-const numbers = "0123456789"
-const lineComment = "//"
-const multiLineCommentStart = "/*"
-const multiLineCommentEnd = "*/"
-const keywords = [
-  'let', 'const', 'var', 'from', 'import', 'export', 'default', 'function', 'async', 
-  'await', 'void', 'return', 'if', 'else', 'for', 'class', "=>", "while"
-]
-const keywordsValues = ['true', 'false', 'null', 'undefined']
-
-/** Checks for the token category a particular character falls into
- * @params {string} char: the target character
- * @params {string} currentTokenType: the token category the previous set of [one or more] characters before it falls into
- **/
-function checkTokenType(char: string, currentTokenType: string) {
-  let prevTokenType = null
-
-  if (delimiters.includes(char)) {
-    if (currentTokenType !== 'delimiter') {
-      if (char === '(' && currentTokenType === "unknown") {
-        prevTokenType = "possible function call"
-      }else prevTokenType = currentTokenType
-      currentTokenType = 'delimiter'
-    }
-  }else if (operators.includes(char)) {
-    if (currentTokenType !== 'operator') {
-      prevTokenType = currentTokenType
-      currentTokenType = 'operator'
-    }
-  }else if (currentTokenType !== 'unknown') {
-    prevTokenType = currentTokenType
-    currentTokenType = 'unknown'
-  }
-  return [prevTokenType, currentTokenType]
-}
-
-// Creates a CODE HTML Element and applies the classStr parameter as a class name for styling
-function styleCode(token: string, classStr: string) {
-  let codeElement = document.createElement("code")
-  codeElement.append(document.createTextNode(token)) // might break;
-  codeElement.className = classStr
-  return codeElement;
-}
-
-// Generates a CODE HTML Element with a unique styling for a specific token type
-function highlightedToken(tokenType:string, token:string) {
-  if (tokenType === "escape sequence") {
-    return styleCode(token, "text-pink-300")
-  }else if (tokenType === "block list" || tokenType === "block list 1"){
-    return styleCode(token, "text-amber-500")
-  }else if (tokenType === "ordered list item") {
-    return styleCode(token, "text-amber-300")
-  }else if (tokenType === "markdown delimiters" ){
-    return styleCode(token, "")
-  }else if (tokenType === "link delimiter") {
-    return styleCode(token, "text-cyan-300")
-  }else if (tokenType === "link address") {
-    return styleCode(token, "text-sky-600 underline")
-  }else if (tokenType === "emphasis|strong") {
-    return styleCode(token, "text-purple-400")
-  }else if (tokenType === "tag delimiter") {
-    return styleCode(token, "text-sky-200")
-  }else if (tokenType === "html attr assignment") {
-    return styleCode(token, "text-gray-200")
-  }else if (tokenType === "tag name") {
-    return styleCode(token, "text-red-400")
-  }else if (tokenType === "inline code body") {
-    return styleCode(token, "text-white bg-slate-600")
-  }else if (tokenType === "code delimiter start" || tokenType === "code delimiter end"){
-    return styleCode(token, "text-slate-400")
-  }else if (tokenType === "plain text") {
-    return styleCode(token, "text-white")
-  }else if (tokenType === "code type" || tokenType === "attribute name") {
-    return styleCode(token, "text-purple-400")
-  }else if (tokenType === "comment") {
-    return styleCode(token, "text-gray-300")
-  }else if (tokenType === "string" || tokenType === "value") {
-    return styleCode(token, "text-green-400")
-  }else if ( !isNaN(token * 0) && tokenType === 'unknown' ) { // todo: improve string is number check [2\\3 won't get parsed]
-    return styleCode(token, "text-orange-300")
-  }else if (keywords.includes(token.trimRight())) {
-    return styleCode(token, "text-purple-400")
-  }else if (keywordsValues.includes(token.trimRight())) {
-    return styleCode(token,"text-red-400" )
-  }else if (tokenType === "operator" || operators.includes(token.trim())) {
-    return styleCode(token, "text-amber-500")
-  }else if (tokenType === "delimiter") {
-    return styleCode(token, "text-zinc-200")
-  }else if (tokenType === "possible function call" && !(/^[\d#]/).test(token)) {
-    return styleCode(token, "text-sky-500")
-  }else return styleCode(token, "text-white")
-}
-
-// Checks if char parameter indicates an html block element
-// Returns current token type
-function getTokenTypeIfBlockElement(char: string, token: string, currTokenType: string) {
-  let prevTokenType: any = currTokenType;
-  let normalParsing = false;
-
-  if (token.length === 2 && prevTokenType === 'escape sequence') {
-    normalParsing = true
-    return [prevTokenType, currTokenType, normalParsing]
-  }else if (("-+#>=").includes(char)) {
-    if (currTokenType !== 'block list') {
-      currTokenType = 'block list'
-    }
-  }else if (("0123456789.").includes(char)) {
-    if (char === '.' && !(/^\d+$/).test(token)) {
-      normalParsing = true;
-    }else if (char !== '.') {
-      if (currTokenType !== 'ordered list item') {
-        currTokenType = 'ordered list item'
-      }else if ((/^\d+\.$/).test(token)) {
-        normalParsing = true;
-      }
-    }
-  }else if (char === '*') {
-    if (currTokenType !== 'block list 1') {
-      currTokenType = 'block list 1'
-    }
-  }else if (char === " " || char === "\n"){
-    if (currTokenType !== 'markdown delimiters') {
-      currTokenType = 'markdown delimiters'
-    }
-  }else {
-    normalParsing = true;
-  }
-  prevTokenType = (prevTokenType === currTokenType) ? null : prevTokenType;
-
-  if (char === '\\' && token !== '\\') {
-    prevTokenType = currTokenType
-    currTokenType = "escape sequence"
-    normalParsing = false
-  }else if (token === '\\') {
-    if (!normalParsing) {
-      prevTokenType = null
-      currTokenType = "escape sequence"
-    }
-  }
-  return [prevTokenType, currTokenType, normalParsing]
-}
-
-function getHTMLTokenType(char: string, token: string, currTokenType: string|null) {
-  let prevTokenType: any = null
-  let endOfTag = false;
-
-  if (currTokenType === "tag delimiter") {
-    if (token === '>' || token === '/>') {
-      endOfTag = true;
-      prevTokenType = currTokenType
-    }else if ((/\w|\d/).test(char)) {
-      if (token === '<' || token == '</') {
-        prevTokenType = currTokenType
-        currTokenType = "tag name"
-      }
-    }else if (char !== '/' || (char === '/' && token !== '<')) {
-      endOfTag = true;
-      currTokenType = "plain text"
-    }
-  }else if (currTokenType === "tag name" || currTokenType === "value") {
-    if (char === ' ') {
-      prevTokenType = currTokenType
-      currTokenType = "attribute name"
-    }
-  }else if (currTokenType === "html attr assignment") {
-    if (char !== '/' && char !== '>') { // currTokenType and PrevTokenType will still be modified if char is '/' or '>'
-      prevTokenType = currTokenType
-      currTokenType = "value"
-    }
-  }else if (currTokenType === "attribute name") {
-    if (char === '=') {
-      prevTokenType = currTokenType
-      currTokenType = "html attr assignment"
-    }
-  }else {
-    endOfTag = true
-    prevTokenType = currTokenType
-  }
-  return [prevTokenType, currTokenType, endOfTag];
-}
-
-
-function getInlineElementTokenType(char: string, token: string, linkState: string | null, currTokenType: string | null, inHTML: boolean) {
-  if (linkState === "closed link text" && char !== '(') {
-    linkState = null
-  }
-  let prevTokenType = null;
-  if (currTokenType === "value" && ("'\"").includes(token[0])) {
-    if (token.length === 1 || (token[0] !== token[token.length-1])) {
-      return [prevTokenType, currTokenType, linkState]
-    }
-  }
-
-  prevTokenType = currTokenType;
-  let endOfTag = true;
-  
-  [prevTokenType, currTokenType, endOfTag] = getHTMLTokenType(char, token, currTokenType)
-
-  if (!inHTML && endOfTag) {
-    if (char === '!' && linkState !== "opened link text") {
-      if (token === '!') {
-        prevTokenType = "plain text"
-      }
-      currTokenType = "link delimiter"
-    }else if (char  === '[' && linkState !== "opened link text") {
-      if (currTokenType !== "link delimiter") {
-        currTokenType = "link delimiter"
-      }
-      linkState = "opened link text"
-    }else if (char === ']' && linkState === "opened link text") {
-      currTokenType = "link delimiter"
-      linkState = "closed link text"
-    }else if (char === '(' && linkState === "closed link text") {      
-      linkState = "opened link address"
-    }else if (char === "*" || char === "_") {
-      if (currTokenType !== "emphasis|strong") {
-        currTokenType = "emphasis|strong"
-      }
-    }else if (!('<\\').includes(char) && currTokenType !== "plain text") {
-      currTokenType = "plain text"
-    }
-  }
-
-  if (prevTokenType === currTokenType) {
-    prevTokenType = null
-  }
-
-  if (endOfTag) {
-    if (char === '<') { // won't highlight if followed by a '\n'. valid behaviour
-      if (token === '<') {
-        prevTokenType = "plain text"
-      }else prevTokenType = currTokenType;
-      currTokenType = "tag delimiter"
-    }else if (currTokenType === "tag delimiter") {
-      prevTokenType = currTokenType
-      currTokenType = "plain text"
-    }
-  }else { // single tag entity hasn't been closed by an appropriate delimiter
-    if (char === '/' && currTokenType !== "tag delimiter"){ // so it doesn't interfere with "</" types
-      prevTokenType = currTokenType
-      currTokenType = "attribute name"
-    }else if (char === '>') {
-      if (token !== '/') {
-        prevTokenType = currTokenType
-      }
-      currTokenType = "tag delimiter"
-    }
-  }
-
-  if (!inHTML) {
-    if (char === '\\' && token !== '\\') {
-      prevTokenType = currTokenType
-      currTokenType = "escape sequence"
-    }else if (token === '\\') {
-      prevTokenType = null
-      if (currTokenType !== "plain text") {      
-        currTokenType = "escape sequence"
-        linkState = null; // just in case
-      }
-    }
-  }
-  return [prevTokenType, currTokenType, linkState]
-}
-
-function getJsTokenType(char: string, token: string, currentTokenType: string | null, state: any) {
-  let prevTokenType = null
-
-  if (currentTokenType === "escape sequence" && token.length < 2) {
-    return [prevTokenType, currentTokenType, state]
-  }else if (currentTokenType === "escape sequence" && token.length === 2) {
-    prevTokenType = currentTokenType
-    currentTokenType = "string"
-  }
-
-  if (currentTokenType === "comment") {
-    if (state.openedComment === "/*" && token.slice(token.length-2, token.length) === "*/") {
-      state.openedComment = ""
-    }else if (state.openedComment === '//' && char === '\n') {
-      state.openedComment = ""
-    }
-  }else if (currentTokenType === "string") {
-    if (token.length === 1 && !state.openedStringDelimiter) {
-      state.openedStringDelimiter = token
-    }else if (token[token.length - 1] === state.openedStringDelimiter) {
-      if (!prevTokenType) { // so we can escape string literal marks=ers
-        state.openedStringDelimiter = ""
-      } 
-    }
-
-    if (char === '\\') {
-      prevTokenType = currentTokenType
-      currentTokenType = "escape sequence"
-    }
-
-    if (char === '\n' && (state.openedStringDelimiter === '"' || state.openedStringDelimiter === "'")) {
-      state.openedStringDelimiter = ""
-    }
-  }
-
-  if (!state.openedComment && !state.openedStringDelimiter) {
-    if (token === '//' || token === '/*'){
-      currentTokenType = "comment"
-      state.openedComment = token
-    }else if (char === '"' || char === "'" || char === "`") {
-      prevTokenType = currentTokenType
-      currentTokenType = "string"
-    }else if ((char === '/' || char === '*') && token){
-      if (token.length > 1 || token[0] !== '/') {
-        prevTokenType = currentTokenType
-      }
-    }else {
-      [prevTokenType, currentTokenType] = checkTokenType(char, currentTokenType as string)
-    }
-  } 
-
-  if (char !== " " && token[token.length-1] === " ") {
-    if (currentTokenType === "unknown") {
-      prevTokenType = currentTokenType
-    }
-  }
-  return [prevTokenType, currentTokenType, state]
-}
-
-function getCodeEndDelimiterTokenType(char: string, openedBacktick: string, token: string, currentTokenType: string) {
-  let prevTokenType = null
-  if (char === '`') {
-    if (token[token.length - 1] !== '`') {
-     prevTokenType = currentTokenType 
-    }
-    if (char === openedBacktick || (token + char) === openedBacktick) {
-      currentTokenType = "code delimiter end"
-    }
-  }else if (char === '\n') {
-    prevTokenType = "code type"
-    currentTokenType = "delimiter"
-  }
-  return [prevTokenType, currentTokenType]
-}
-
-function getCodeStartDelimiterTokenType(char: string, token: string, currentTokenType: string) {
-  let prevTokenType = null
-  if (char !== '`') {
-    prevTokenType = currentTokenType
-    if (char !== '\n') {
-      currentTokenType = "inline code body"
-    }else if (token.length > 2) {
-      currentTokenType = "delimiter"
-    }else {
-      prevTokenType = "plain text"
-    }
-  }else if (currentTokenType !== "code delimiter start") {
-    prevTokenType = currentTokenType
-    currentTokenType = "code delimiter start"
-  }
-  return [prevTokenType, currentTokenType]
-}
-
-function changePrevTokensHighlightColor(index: number, highlightedCode: HTMLElement[]) {
-  while (index >= 0) {
-    if ((" \n").includes((highlightedCode[index].textContent as string)[0])) {
-      break;
-    }
-    if ((highlightedCode[index].textContent as string)[0] === "*") {
-      highlightedCode[index].className = "text-purple-400"
-    }else {
-      highlightedCode[index].className = "text-white"
-    }
-    index--;
-  }
-}
-
-function changeCurrentTokenType(token: string) {
-  let currentTokenType = ""
-  if (token[0] === "*") {
-    currentTokenType = "emphasis|strong"
-  }else if (token[0] === '\\'){
-    currentTokenType = "escape sequence"
-  }else currentTokenType = "plain text"
-  return currentTokenType;
-}
-
-// updates the state of openedTags
-function getOpenedHTMLTagsInfo(tagDelimiter: string, token: string, prevTokenType: string, openedTags: string[]) {
-  if (prevTokenType === "tag name") {
-    if (tagDelimiter === '<') { // token is an opened html tag name
-      openedTags.push(token.toLowerCase()) // so we can easily detect later if the tag has been closed
-    }else if (tagDelimiter === '</') {
-      if (openedTags[openedTags.length - 1] === token.toLowerCase()) { // tag names are case insesitive
-        openedTags.pop() // removes the opened tag from the array
-      }
-    }
-  }else if (tagDelimiter === "/>") {
-    openedTags.pop() // removes the last void tag that was classified as an opened tag 
-  }
-
-  return openedTags
-}
+import { changePrevTokensHighlightColor, changeCurrentTokenType } from "./backtracker"
+import experimental from "./embedded_sourcecode_tokenizer"
+import highlightedToken from "./token_highlighter"
+import getTokenTypeIfBlockElement from "./markdown_block_tokenizer"
+import { getOpenedHTMLTagsInfo } from "./html_tokenizer"
+import getInlineElementTokenType from "./markdown_inline_tokenizer"
 
 function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let token = ""; // stores a lexical token
@@ -416,15 +22,12 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
     the previous token category once a new token category is found */
   let prevTokenType = null;
 
-  let openedBacktick = ""; // stores code block delimiter
-  let codeHighlight = false;
   let lineNum = 1;
   let normalParsing = false;
   let linkState: string|null = null;
-  let codeBlock = false;
   let openedTags: string[] = []; // stores the name of all opened tags when html is used in markdown.
   let openTagDelimiter = ""
-  let codeBlockState: any = {openedComment: "", openedStringDelimiter: ""}
+  let codeBlockState: any = {language: "", openedComment: "", openedStringDelimiter: "", delimiter: "", embeddedType: ""}
 
   while (i <= text.length) {
     // i would be greater than text.length on last iteration of the loop
@@ -434,19 +37,24 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       [prevTokenType, currentTokenType, normalParsing] = getTokenTypeIfBlockElement(char, token, currentTokenType as string)
     }
 
-    if (normalParsing && char) {
+    if (normalParsing) {
       if (beginningOfLine){
+        if (token[0] !== ' ' && token[0] !== '\n') {
+          changePrevTokensHighlightColor(highlightedCode.length-1, highlightedCode);
+        }
         currentTokenType = changeCurrentTokenType(token);
-        changePrevTokensHighlightColor(highlightedCode.length-1, highlightedCode);
         beginningOfLine = false
       }
-      if (char === '`' && !codeHighlight) {
-        codeHighlight = true
-      }
-      if (!codeHighlight && linkState !== "opened link address") {
-        [prevTokenType, currentTokenType, linkState] = getInlineElementTokenType(char, token, linkState, currentTokenType, openedTags.length)
-        openedTags = getOpenedHTMLTagsInfo(openTagDelimiter, token, prevTokenType, openedTags);
 
+      if (linkState !== "opened link address") {
+        if (linkState === "closed link text" && char !== '(') {
+          linkState = null
+        }
+        [prevTokenType, currentTokenType, codeBlockState] = experimental(char, token, currentTokenType, codeBlockState)
+        if (!codeBlockState.embeddedType) {
+          [prevTokenType, currentTokenType, linkState] = getInlineElementTokenType(char, token, linkState, currentTokenType, openedTags.length)
+          openedTags = getOpenedHTMLTagsInfo(openTagDelimiter, token, prevTokenType, openedTags);
+        }
       }else if (linkState === "opened link address") { // link address token category has been found
         // every character including special characters and excluding ')' should be considered part of the category
 
@@ -458,27 +66,13 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
           prevTokenType = currentTokenType
           currentTokenType = "link address";
         }
-      }else if (codeHighlight) { // char is currently in a code container according to the syntax of markdown
-        if (codeBlock) {
-          [prevTokenType, currentTokenType, codeBlockState] = getJsTokenType(char, token, currentTokenType, codeBlockState)
-        }else if (currentTokenType === "inline code body") {
-          [prevTokenType, currentTokenType] = getCodeEndDelimiterTokenType(char, openedBacktick, token, currentTokenType)
-        }else {
-          [prevTokenType, currentTokenType] = getCodeStartDelimiterTokenType(char, token, currentTokenType as any)
-        }
-        if (currentTokenType === "code delimiter end" || prevTokenType === "plain text") {
-          codeHighlight = false
-          openedBacktick = ""
-        }else if (currentTokenType === "delimiter") {
-          codeBlock = true
-        }
-      }
+      } 
     }
 
     /* The last index of text was checked cause there's sometimes a 
      redundant new line at the end of text param*/
     if (char === '\n' && i !== text.length-1) {
-      if (!codeHighlight && openedTags.length === 0) {
+      if (!codeBlockState.embeddedType && openedTags.length === 0) {
         beginningOfLine = true;
         normalParsing = false;
       }
