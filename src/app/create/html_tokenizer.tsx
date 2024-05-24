@@ -39,9 +39,12 @@ export default function getHTMLTokenType(char: string, token: string, currTokenT
 
 // updates the state of openedTags
 export function getOpenedHTMLTagsInfo(tagDelimiter: string, token: string, prevTokenType: string, openedTags: string[]) {
+  const VOID_ELEMENTS = ["area", "base", "br", "col", "embed", "hr", "img",
+                         "input", "link", "meta", "source", "track", "wbr"]
   if (prevTokenType === "tag name") {
     if (tagDelimiter === '<') { // token is an opened html tag name
-      openedTags.push(token.toLowerCase()) // so we can easily detect later if the tag has been closed
+      let element = token.toLowerCase()
+      if (!VOID_ELEMENTS.includes(element)) openedTags.push(element); // so we can easily detect later if the tag has been closed
     }else if (tagDelimiter === '</') {
       if (openedTags[openedTags.length - 1] === token.toLowerCase()) { // tag names are case insesitive
         openedTags.pop() // removes the opened tag from the array

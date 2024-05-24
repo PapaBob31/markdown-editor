@@ -10,14 +10,10 @@ export default function getTokenTypeIfBlockElement(char: string, token: string, 
       currTokenType = 'block list'
     }
   }else if (("0123456789.").includes(char)) {
-    if (char === '.' && !(/^\d+$/).test(token)) {
+    if (currTokenType !== "ordered list item") {
+      currTokenType = "ordered list item"
+    }else if (!(/^\d+\.?$/).test(token)) {
       normalParsing = true;
-    }else if (char !== '.') {
-      if (currTokenType !== 'ordered list item') {
-        currTokenType = 'ordered list item'
-      }else if ((/^\d+\.$/).test(token)) {
-        normalParsing = true;
-      }
     }
   }else if (char === '*') {
     if (currTokenType !== 'block list 1') {
@@ -29,6 +25,11 @@ export default function getTokenTypeIfBlockElement(char: string, token: string, 
     }
   }else {
     normalParsing = true;
+  }
+  if (prevTokenType === "ordered list item" && currTokenType !== prevTokenType) { // tokentype was just chnaged from "ordered list item"
+    if (!(/^\d+\.$/).test(token)) { // token is not in format '1.'
+      normalParsing = true;
+    }
   }
   prevTokenType = (prevTokenType === currTokenType) ? null : prevTokenType;
 
