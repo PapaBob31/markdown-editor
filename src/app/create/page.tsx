@@ -8,6 +8,7 @@ import highlightedToken from "./token_highlighter"
 import getTokenTypeIfBlockElement from "./markdown_block_tokenizer"
 import { getOpenedHTMLTagsInfo } from "./html_tokenizer"
 import getInlineElementTokenType from "./markdown_inline_tokenizer"
+const TAB_TO_SPACES = 2
 
 function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let token = ""; // stores a lexical token
@@ -121,10 +122,11 @@ export default function CodeEditor() {
     return numbersJSX
   }
 
-  function interceptEnterKey(event: React.KeyboardEvent){
+  function interceptKey(event: React.KeyboardEvent){
+    let caretOffset, selectedTextLength;
     if (event.key === "Enter") {
-      event.preventDefault()
-      let [caretOffset, selectedTextLength] = getCurrentCaretPosition(event.target as HTMLElement)
+      event.preventDefault();
+      [caretOffset, selectedTextLength] = getCurrentCaretPosition(event.target as HTMLElement)
       if (localValue.current === "") {
         /*I don't use innertext because different browsers implement different behaviours with innerText. For example:
         getting innerText after Enter Key press on empty contentEditable Element return '\n\n\n' in chrome but '\n\n' in firefox*/
@@ -138,12 +140,19 @@ export default function CodeEditor() {
       if (caretOffset === localValue.current.length) {
         localValue.current += "\n"
       }
-      let [htmlTextList, updatedNumber, caretElement, newCaretOffset] = highlightMarkDown(localValue.current, caretOffset)
-      event.target.innerHTML = ""
-      event.target.append(...htmlTextList)
-      setNumberOfLines(updatedNumber)
-      moveCaretToNewPosition(newCaretOffset, caretElement.firstChild)
-    }
+    }else if (event.key === "Tab") {
+      event.preventDefault();
+      [caretOffset, selectedTextLength] = getCurrentCaretPosition(event.target as HTMLElement)
+      let stl = selectedTextLength
+      localValue.current = localValue.current.slice(0, caretOffset) + (" ").repeat(TAB_TO_SPACES) + localValue.current.slice(caretOffset+stl, localValue.current.length)
+      caretOffset+=TAB_TO_SPACES
+    }else return;
+
+    let [htmlTextList, updatedNumber, caretElement, newCaretOffset] = highlightMarkDown(localValue.current, caretOffset)
+    event.target.innerHTML = ""
+    event.target.append(...htmlTextList)
+    setNumberOfLines(updatedNumber)
+    moveCaretToNewPosition(newCaretOffset, caretElement.firstChild)
   }
 
   function reStyleCode(event) {
@@ -168,7 +177,7 @@ export default function CodeEditor() {
       <div className="flex">
       <div className="text-gray-200 px-2 leading-tight">{generateNumForLines()}</div>
        {/*pre element's content isn't stored in state because Component's with `contentEditable` can't contain `children` managed by React*/} 
-       <pre contentEditable spellCheck="false" onInput={reStyleCode} ref={preElement} onKeyDown={interceptEnterKey}
+       <pre contentEditable spellCheck="false" onInput={reStyleCode} ref={preElement} onKeyDown={interceptKey}
         className="block leading-tight text-white pl-2 caret-amber-600 outline-none flex-grow">
        </pre>
       </div>
