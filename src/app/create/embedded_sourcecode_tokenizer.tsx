@@ -4,11 +4,14 @@ const acceptedLanguages = ["js"]
 export default function experimental(char: string, token: string, currentTokenType: string, codeBlockState: any) {
   let prevTokenType: any = null
 
-  if (token === codeBlockState.delimiter) {
-    if (codeBlockState.embeddedType !== "code block") {
-      codeBlockState = {language: "", openedComment: "", openedStringDelimiter: "", delimiter: "", embeddedType: ""}
-    }else if (char === '\n') {
-      codeBlockState = {language: "", openedComment: "", openedStringDelimiter: "", delimiter: "", embeddedType: ""}
+  
+  if (codeBlockState.embeddedType !== "code block") {
+    if (token === codeBlockState.delimiter) {
+      codeBlockState = {language: "", openedContainer: "", delimiter: "", embeddedType: "",}
+    }
+  }else if (token[0] === '\n') {
+    if ((token.slice(1, token.length) === codeBlockState.delimiter) && char === '\n') {
+      codeBlockState = {language: "", openedContainer: "", delimiter: "", embeddedType: "",}
       currentTokenType = "code delimiter"
     }
   }
@@ -36,13 +39,13 @@ export default function experimental(char: string, token: string, currentTokenTy
           codeBlockState.language = "text"
         }
       }else if (char === '\n' && codeBlockState.embeddedType !== "code block") {
-        codeBlockState = {language: "", openedComment: "", openedStringDelimiter: "", delimiter: "", embeddedType: ""}
+        codeBlockState = {language: "", openedContainer: "", delimiter: "", embeddedType: "",}
       }
     }else if (!codeBlockState.delimiter) {
       if (char !== '`' && char) {
         codeBlockState.delimiter = token
         if (token.length <= 2 && char === '\n') {
-          codeBlockState = {language: "", openedComment: "", openedStringDelimiter: "", delimiter: "", embeddedType: ""}  
+          codeBlockState = {language: "", openedContainer: "", delimiter: "", embeddedType: "",}  
         }else if (char !== '\n'){
           prevTokenType = currentTokenType
           currentTokenType = "inline code body"

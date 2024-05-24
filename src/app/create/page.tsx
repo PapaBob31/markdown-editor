@@ -27,7 +27,7 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
   let linkState: string|null = null;
   let openedTags: string[] = []; // stores the name of all opened tags when html is used in markdown.
   let openTagDelimiter = ""
-  let codeBlockState: any = {language: "", openedComment: "", openedStringDelimiter: "", delimiter: "", embeddedType: ""}
+  let codeBlockState: any = {language: "", openedContainer: "", delimiter: "", embeddedType: ""}
 
   while (i <= text.length) {
     // i would be greater than text.length on last iteration of the loop
