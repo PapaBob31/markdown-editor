@@ -44,7 +44,9 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
         if (token[0] !== ' ' && token[0] !== '\n') {
           changePrevTokensHighlightColor(highlightedCode.length-1, highlightedCode);
         }
-        currentTokenType = changeCurrentTokenType(token);
+        if (currentTokenType !== "escape sequence") {
+          currentTokenType = changeCurrentTokenType(token);
+        }
         beginningOfLine = false
       }
 

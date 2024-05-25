@@ -5,6 +5,11 @@ export default function getTokenTypeIfBlockElement(char: string, token: string, 
   let prevTokenType: any = currTokenType;
   let normalParsing = false;
 
+  if (currTokenType === "escape sequence" && token.length === 2) {
+    normalParsing = true;
+    return [prevTokenType, currTokenType, normalParsing]
+  }
+
   if (("-+#>=").includes(char)) {
     if (currTokenType !== 'block list') {
       currTokenType = 'block list'
@@ -23,13 +28,19 @@ export default function getTokenTypeIfBlockElement(char: string, token: string, 
     if (currTokenType !== 'markdown delimiters') {
       currTokenType = 'markdown delimiters'
     }
+  }else if (char === '\\') {
+    if (currTokenType !== "escape sequence") {
+      currTokenType = "escape sequence"
+    }
   }else {
     normalParsing = true;
   }
   if (prevTokenType === "ordered list item" && currTokenType !== prevTokenType) { // tokentype was just chnaged from "ordered list item"
-    if (!(/^\d+\.$/).test(token)) { // token is not in format '1.'
+    if (!(/^\d+\.$/).test(token)) { // token is not in format '1.' 
       normalParsing = true;
     }
+  }else if (prevTokenType === "escape sequence" && currTokenType !== prevTokenType) {
+    currTokenType = "escape sequence"
   }
   prevTokenType = (prevTokenType === currTokenType) ? null : prevTokenType;
 
