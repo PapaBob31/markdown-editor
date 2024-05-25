@@ -33,6 +33,7 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
   while (i <= text.length) {
     // i would be greater than text.length on last iteration of the loop
     let char = ( i < text.length ? text[i] : "");
+    if (char === '\t') char = (' ').repeat(TAB_TO_SPACES);
 
     if (beginningOfLine && char) {
       [prevTokenType, currentTokenType, normalParsing] = getTokenTypeIfBlockElement(char, token, currentTokenType as string)
@@ -52,7 +53,7 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
           linkState = null
         }
         [prevTokenType, currentTokenType, codeBlockState] = experimental(char, token, currentTokenType, codeBlockState)
-        if (!codeBlockState.embeddedType) {
+        if (!codeBlockState.embeddedType && char) {
           [prevTokenType, currentTokenType, linkState] = getInlineElementTokenType(char, token, linkState, currentTokenType, openedTags.length)
           openedTags = getOpenedHTMLTagsInfo(openTagDelimiter, token, prevTokenType, openedTags);
         }

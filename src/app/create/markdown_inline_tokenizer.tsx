@@ -2,6 +2,7 @@ import getHTMLTokenType from "./html_tokenizer"
 
 export default function getInlineElementTokenType(char: string, token: string, linkState: string | null, currTokenType: string | null, inHTML: boolean) {
   let prevTokenType = null;
+
   if (currTokenType === "value" && ("'\"").includes(token[0])) {
     if (token.length === 1 || (token[0] !== token[token.length-1])) {
       return [prevTokenType, currTokenType, linkState]
@@ -9,11 +10,11 @@ export default function getInlineElementTokenType(char: string, token: string, l
   }
 
   prevTokenType = currTokenType;
-  let endOfTag = true;
-  
-  [prevTokenType, currTokenType, endOfTag] = getHTMLTokenType(char, token, currTokenType)
+  let notInsideTag = true; // indicates if a character being parsed is not part of an html tag
 
-  if (!inHTML && endOfTag) {
+  [prevTokenType, currTokenType, notInsideTag] = getHTMLTokenType(char, token, currTokenType)
+
+  if (!inHTML && notInsideTag) {
     if (char === '!' && linkState !== "opened link text") {
       if (token === '!') {
         prevTokenType = "plain text"
@@ -42,13 +43,13 @@ export default function getInlineElementTokenType(char: string, token: string, l
     prevTokenType = null
   }
 
-  if (endOfTag) {
-    if (char === '<') { // won't highlight if followed by a '\n'. valid behaviour
+  if (notInsideTag) {
+    if (char === '<') {
       if (token === '<') {
         prevTokenType = "plain text"
       }else prevTokenType = currTokenType;
       currTokenType = "tag delimiter"
-    }else if (currTokenType === "tag delimiter") {
+    }else if (inHTML && currTokenType !== "plain text") {
       prevTokenType = currTokenType
       currTokenType = "plain text"
     }
