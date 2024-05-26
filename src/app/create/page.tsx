@@ -3,7 +3,7 @@
 import React, { useState, useRef } from "react"
 import { getCurrentCaretPosition, moveCaretToNewPosition } from "../utilities"
 import { changePrevTokensHighlightColor, changeCurrentTokenType } from "./backtracker"
-import experimental from "./embedded_sourcecode_tokenizer"
+import getCodeBlockTokenTypes from "./embedded_sourcecode_tokenizer"
 import highlightedToken from "./token_highlighter"
 import getTokenTypeIfBlockElement from "./markdown_block_tokenizer"
 import { getOpenedHTMLTagsInfo } from "./html_tokenizer"
@@ -39,7 +39,7 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       [prevTokenType, currentTokenType, normalParsing] = getTokenTypeIfBlockElement(char, token, currentTokenType as string)
     }
 
-    if (normalParsing) {
+    if (normalParsing) { // non block indicating character was discovered at the beginning of a line
       if (beginningOfLine){
         if (token[0] !== ' ' && token[0] !== '\n') {
           changePrevTokensHighlightColor(highlightedCode.length-1, highlightedCode);
@@ -51,24 +51,12 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       }
 
       if (linkState !== "opened link address") {
-        if (linkState === "closed link text" && char !== '(') {
-          linkState = null
-        }
-        [prevTokenType, currentTokenType, codeBlockState] = experimental(char, token, currentTokenType, codeBlockState)
-        if (!codeBlockState.embeddedType && char) {
-          [prevTokenType, currentTokenType, linkState] = getInlineElementTokenType(char, token, linkState, currentTokenType, openedTags.length)
-          openedTags = getOpenedHTMLTagsInfo(openTagDelimiter, token, prevTokenType, openedTags);
-        }
-      }else if (linkState === "opened link address") { // link address token category has been found
-        // every character including special characters and excluding ')' should be considered part of the category
-
-        if (char == ')') { // link delimiter token category was just found
-          prevTokenType = currentTokenType
-          currentTokenType = "link delimiter";
-          linkState = null;
-        }else if (currentTokenType !== "link address") { // Prevents switching category from link address to link address
-          prevTokenType = currentTokenType
-          currentTokenType = "link address";
+        [prevTokenType, currentTokenType, codeBlockState] = getCodeBlockTokenTypes(char, token, currentTokenType, codeBlockState)
+      }
+      if (!codeBlockState.embeddedType && char) {
+        [prevTokenType, currentTokenType, linkState] = getInlineElementTokenType(char, token, linkState, currentTokenType, Boolean(openedTags.length))
+        if (prevTokenType === "tag name") {
+          openedTags = getOpenedHTMLTagsInfo(openTagDelimiter, token, openedTags);  
         }
       } 
     }

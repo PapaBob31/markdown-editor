@@ -1,5 +1,5 @@
 
-// Checks if char parameter indicates an html block element
+// Checks if char (character) parameter indicates an html block element
 // Returns current token type
 export default function getTokenTypeIfBlockElement(char: string, token: string, currTokenType: string) {
   let prevTokenType: any = currTokenType;

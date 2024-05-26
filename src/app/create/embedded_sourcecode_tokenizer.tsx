@@ -1,17 +1,18 @@
 import { getJsTokenType, getPlainText } from "./prog_lang_tokenizer"
 const acceptedLanguages = ["js"]
 
-export default function experimental(char: string, token: string, currentTokenType: string, codeBlockState: any) {
+// Used to get the token type which will be used to highlight embedded code blocks inside markdown
+export default function getCodeBlockTokenTypes(char: string, token: string, currentTokenType: string, codeBlockState: any) {
   let prevTokenType: any = null
-
   
-  if (codeBlockState.embeddedType !== "code block") {
+  if (codeBlockState.embeddedType === "code span") {
     if (token === codeBlockState.delimiter) {
-      codeBlockState = {language: "", openedContainer: "", delimiter: "", embeddedType: "",}
+      codeBlockState = {language: "", openedContainer: "", delimiter: "", embeddedType: ""}
+      currentTokenType = "code delimiter"
     }
   }else if (token[0] === '\n') {
     if ((token.slice(1, token.length) === codeBlockState.delimiter) && char === '\n') {
-      codeBlockState = {language: "", openedContainer: "", delimiter: "", embeddedType: "",}
+      codeBlockState = {language: "", openedContainer: "", delimiter: "", embeddedType: ""}
       currentTokenType = "code delimiter"
     }
   }
@@ -39,15 +40,18 @@ export default function experimental(char: string, token: string, currentTokenTy
           codeBlockState.language = "text"
         }
       }else if (char === '\n' && codeBlockState.embeddedType !== "code block") {
-        codeBlockState = {language: "", openedContainer: "", delimiter: "", embeddedType: "",}
+        codeBlockState = {language: "", openedContainer: "", delimiter: "", embeddedType: ""}
       }
     }else if (!codeBlockState.delimiter) {
       if (char !== '`' && char) {
         codeBlockState.delimiter = token
         if (token.length <= 2 && char === '\n') {
-          codeBlockState = {language: "", openedContainer: "", delimiter: "", embeddedType: "",}  
+          codeBlockState = {language: "", openedContainer: "", delimiter: "", embeddedType: ""}  
         }else if (char !== '\n'){
           prevTokenType = currentTokenType
+          if (token.length <= 2) {
+            codeBlockState.embeddedType = "code span"
+          }
           currentTokenType = "inline code body"
         }else if (char === '\n' && codeBlockState.embeddedType === "code block"){
           codeBlockState.language = "text"

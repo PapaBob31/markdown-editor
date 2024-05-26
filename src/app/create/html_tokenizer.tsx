@@ -1,12 +1,14 @@
+
+// Checks if a character falls into a token category that's part of an html tag
 export default function getHTMLTokenType(char: string, token: string, currTokenType: string|null) {
   let prevTokenType: any = null
   let endOfTag = false;
 
-  if (currTokenType === "tag delimiter") {
-    if (token === '>' || token === '/>') {
+  if (currTokenType === "tag delimiter") { // token actually delimits a tag and not a plain text in token format
+    if (token === '>' || token === '/>') { // token could be '/' which is not a complete delimiter yet
       endOfTag = true;
       prevTokenType = currTokenType
-    }else if ((/\w|\d/).test(char)) {
+    }else if ((/\w|\d/).test(char)) { // character following '<' is alphanumeric as in the proper syntax for html tags
       if (token === '<' || token == '</') {
         prevTokenType = currTokenType
         currTokenType = "tag name"
@@ -21,7 +23,7 @@ export default function getHTMLTokenType(char: string, token: string, currTokenT
       currTokenType = "attribute name"
     }
   }else if (currTokenType === "html attr assignment") {
-    if (char !== '/' && char !== '>') { // currTokenType and PrevTokenType will still be modified if char is '/' or '>'
+    if (char !== '/' && char !== '>') { // '/' and '>' can't be matched cause they could be part of the tag's delimiter
       prevTokenType = currTokenType
       currTokenType = "value"
     }
@@ -30,28 +32,32 @@ export default function getHTMLTokenType(char: string, token: string, currTokenT
       prevTokenType = currTokenType
       currTokenType = "html attr assignment"
     }
-  }else {
+  }else { // The current character is not part of an html tag
     endOfTag = true
     prevTokenType = currTokenType
   }
   return [prevTokenType, currTokenType, endOfTag];
 }
 
-// updates the state of openedTags
-export function getOpenedHTMLTagsInfo(tagDelimiter: string, token: string, prevTokenType: string, openedTags: string[]) {
+/**
+* Updates unclosed html tags
+* @param tagDelimiter - last tag delimiter that was found
+* @param token - represents a tag name
+* @param openedTags - Array containing the list of all unclosed html tags
+*/
+export function getOpenedHTMLTagsInfo(tagDelimiter: string, token: string, openedTags: string[]) {
   const VOID_ELEMENTS = ["area", "base", "br", "col", "embed", "hr", "img",
                          "input", "link", "meta", "source", "track", "wbr"]
+
   const lastIndex = openedTags.length - 1
-  if (prevTokenType === "tag name") {
-    if (tagDelimiter === '<') { // token is an opened html tag name
-      let element = token.toLowerCase()
-      if (!VOID_ELEMENTS.includes(element)) {
-        openedTags.push(element); // so we can easily detect later if the tag has been closed
-      }
-    }else if (tagDelimiter === '</') {
-      if (openedTags[lastIndex] === token.toLowerCase()) { // tag names are case insesitive
-        openedTags.pop() // removes the opened tag from the array
-      }
+  if (tagDelimiter === '<') { // token is an opened html tag name
+    let element = token.toLowerCase()
+    if (!VOID_ELEMENTS.includes(element)) {
+      openedTags.push(element); // so we can easily detect later if the tag has been closed
+    }
+  }else if (tagDelimiter === '</') {
+    if (openedTags[lastIndex] === token.toLowerCase()) { // tag names are case insesitive
+      openedTags.pop() // removes the opened tag from the array
     }
   }
   return openedTags
