@@ -79,7 +79,7 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
     if (prevTokenType) { // The start of a new token was just found.
 
       // highlights the token and stores the result in highlightedCode
-      highlightedCode.push(highlightedToken(prevTokenType, token))
+      highlightedCode.push(highlightedToken(prevTokenType, token, codeBlockState.language))
 
       let lti = highlightedCode.length - 1 // lastTokenIndex
       if (i >= newCaretOffset && !caretElement) {

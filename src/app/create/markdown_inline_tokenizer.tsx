@@ -25,7 +25,7 @@ export default function getInlineElementTokenType(char: string, token: string, l
   }
 
   /* change prevTokenType ahead in order to prevent repetition of code
-   since there are multiple different conditions that will result in the code below */
+   since there are multiple different conditions that might result in the code below */
   prevTokenType = currTokenType;
 
   let notInsideTag = true; // indicates if a character being parsed is not part of an html tag
