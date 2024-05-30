@@ -2,7 +2,7 @@
 
 import React, { useState, useRef } from "react"
 import { getCurrentCaretPosition, moveCaretToNewPosition } from "../utilities"
-import { changePrevTokensHighlightColor, changeCurrentTokenType } from "./backtracker"
+import changeInvalidHighlightColor from "./backtracker"
 import getCodeBlockTokenTypes from "./embedded_sourcecode_tokenizer"
 import highlightedToken from "./token_highlighter"
 import getTokenTypeIfBlockElement from "./markdown_block_tokenizer"
@@ -10,50 +10,48 @@ import { getOpenedHTMLTagsInfo } from "./html_tokenizer"
 import getInlineElementTokenType from "./markdown_inline_tokenizer"
 const TAB_TO_SPACES = 2
 
-function highlightMarkDown(text: string, newCaretOffset: number) : any {
+
+/** Tokenizes a markdown text stream and returns an array containing A nested array of highlighted tokens,
+ * no of lines in the text stream and 2 other useful items related to the caret offset in the token
+ * @param text: the markdown text stream to be highlighted
+ * @param newCaretOffset: the caret offset relative to the text stream
+ **/
+function highlightMarkDown(text: string, newCaretOffset: number) : any[] {
   let token = ""; // stores a lexical token
-  let beginningOfLine = true // some tokens fall into a specific category when found at the beginning of a line
-  let highlightedCode = [];
+  let beginningOfLine = true
+  let highlightedCode = []; // stores each highlighted token in the order it was found in the text strem
   let i = 0;
-  let caretOffset = 0;
-  let caretElement = null;
+  let caretElement = null; // highlighted token containing the specific character before the caret offset
+  let caretOffset = 0; // caret offset relative to the content of caretElement
   let currentTokenType = null; // category of the current token
-
-  /* Used to indicate a switch in current token category. It does this by storing
-    the previous token category once a new token category is found */
-  let prevTokenType = null;
-
+  let prevTokenType = null; // previous token category when a new token category is encountered
   let lineNum = 1;
   let normalParsing = false;
   let linkState: string|null = null;
   let openedTags: string[] = []; // stores the name of all opened tags when html is used in markdown.
   let openTagDelimiter = ""
-  let codeBlockState: any = {language: "", openedContainer: "", delimiter: "", embeddedType: ""}
+  let codeBlockState: any = {language: "", openedContainer: "", delimiter: "", embeddedType: ""} // stores state when tokenizing embedded code blocks
 
   while (i <= text.length) {
-    // i would be greater than text.length on last iteration of the loop
+    // iterate through the text stream 'text.length + 1' times. The last iteration is needed by the algorithm
     let char = ( i < text.length ? text[i] : "");
     if (char === '\t') char = (' ').repeat(TAB_TO_SPACES);
 
     if (beginningOfLine && char) {
+      // special characters indicating html code blocks are only valid at the beginning of a line
       [prevTokenType, currentTokenType, normalParsing] = getTokenTypeIfBlockElement(char, token, currentTokenType as string)
     }
 
     if (normalParsing) { // non block indicating character was discovered at the beginning of a line
-      if (beginningOfLine){
-        if (token[0] !== ' ' && token[0] !== '\n') {
-          changePrevTokensHighlightColor(highlightedCode.length-1, highlightedCode);
-        }
-        if (currentTokenType !== "escape sequence") {
-          currentTokenType = changeCurrentTokenType(token);
-        }
-        beginningOfLine = false
+      if (beginningOfLine) {
+        currentTokenType = changeInvalidHighlightColor(token, highlightedCode.length-1, highlightedCode)
+        beginningOfLine = false // prevents changing the 'invalid' highlight color of tokens at every iteration.
       }
 
-      if (linkState !== "opened link address") {
+      if (linkState !== "opened link address") { // backticks won't be special characters when present in a link address
         [prevTokenType, currentTokenType, codeBlockState] = getCodeBlockTokenTypes(char, token, currentTokenType, codeBlockState)
       }
-      if (!codeBlockState.embeddedType && char) {
+      if (!codeBlockState.embeddedType && char) { // All markdown special characters shouldn't be special inside a code block
         [prevTokenType, currentTokenType, linkState] = getInlineElementTokenType(char, token, linkState, currentTokenType, Boolean(openedTags.length))
         if (prevTokenType === "tag name") {
           openedTags = getOpenedHTMLTagsInfo(openTagDelimiter, token, openedTags);  
@@ -71,23 +69,20 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any {
       lineNum++
     }
 
-    if (currentTokenType && !char) { // we are done iterating through the text
-      // Stores currentTokenType's content so the current token can be highlighted 
-      prevTokenType = currentTokenType
+    if (currentTokenType && !char) { // We are done iterating through the text
+      prevTokenType = currentTokenType // allows the last token found to be highlighted
     }
 
-    if (prevTokenType) { // The start of a new token was just found.
-
-      // highlights the token and stores the result in highlightedCode
+    if (prevTokenType) { // Proceed to highlight a token
       highlightedCode.push(highlightedToken(prevTokenType, token, codeBlockState.language))
 
       let lti = highlightedCode.length - 1 // lastTokenIndex
-      if (i >= newCaretOffset && !caretElement) {
+      if (i >= newCaretOffset && !caretElement) { // the character before the new caret offset is in the last highlighted token
         caretElement = highlightedCode[lti]
         caretOffset = caretElement.innerText.length - (i - newCaretOffset)
       }
       openTagDelimiter = (prevTokenType === "tag delimiter" ? token : openTagDelimiter);
-      token = "" // since a new token was just found, content is no longer needed after highlighting
+      token = "" // token's content should be cleared after highlighting to seperate it from other new tokens found
       prevTokenType = null;
     }
     token += char

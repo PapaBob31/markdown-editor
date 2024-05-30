@@ -13,7 +13,7 @@ export function changePrevTokensHighlightColor(index: number, highlightedCode: H
   }
 }
 
-export function changeCurrentTokenType(token: string) {
+export function getNewTokenType(token: string) {
   let currentTokenType = ""
   if (token[0] === "*") {
     currentTokenType = "emphasis|strong"
@@ -21,3 +21,10 @@ export function changeCurrentTokenType(token: string) {
   return currentTokenType;
 }
 
+
+export default function changeInvalidHighlightColor(token: string, index: number, highlightedCode: HTMLElement[]) {
+  if (token[0] !== ' ' && token[0] !== '\n') {
+    changePrevTokensHighlightColor(index, highlightedCode);
+  }
+  return getNewTokenType(token)
+}
