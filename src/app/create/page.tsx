@@ -20,13 +20,13 @@ const TAB_TO_SPACES = 2
 function highlightMarkDown(text: string, newCaretOffset: number) : any[] {
   let token = ""; // stores a lexical token
   let beginningOfLine = true
-  let highlightedCode = []; // stores each highlighted token in the order it was found in the text strem
+  let highlightedCode: HTMLElement[] = []; // stores each highlighted token in the order it was found in the text strem
   let i = 0;
   let caretElement = null; // highlighted token containing the specific character before the caret offset
   let caretOffset = 0; // caret offset relative to the content of caretElement
   let currentTokenType = null; // category of the current token
   let prevTokenType = null; // previous token category when a new token category is encountered
-  let lineNum = 1;
+  let lineNum = 1; // number of lines in the text stream
   let normalParsing = false;
   let linkState: string|null = null;
   let openedTags: string[] = []; // stores the name of all opened tags when html is used in markdown.
@@ -45,7 +45,7 @@ function highlightMarkDown(text: string, newCaretOffset: number) : any[] {
 
     if (normalParsing) { // non block indicating character was discovered at the beginning of a line
       if (beginningOfLine) {
-        currentTokenType = changeInvalidHighlightColor(token, highlightedCode.length-1, highlightedCode)
+        currentTokenType = changeInvalidHighlightColor(token, currentTokenType, highlightedCode.length-1, highlightedCode)
         beginningOfLine = false // prevents changing the 'invalid' highlight color of tokens at every iteration.
       }
 
@@ -144,14 +144,14 @@ export default function CodeEditor() {
       [localValue.current, caretOffset] = modifiedData;
     }else return;
 
-    let [htmlTextList, updatedNumber, caretElement, newCaretOffset] = highlightMarkDown(localValue.current, caretOffset)
-    event.target.innerHTML = ""
-    event.target.append(...htmlTextList)
+    let [htmlTextList, updatedNumber, caretElement, newCaretOffset] = highlightMarkDown(localValue.current, caretOffset);
+    (event.target as HTMLElement).innerHTML = "";
+    (event.target as HTMLElement).append(...htmlTextList)
     setNumberOfLines(updatedNumber)
     moveCaretToNewPosition(newCaretOffset, caretElement.firstChild)
   }
 
-  function reStyleCode(event) {
+  function reStyleCode(event: any) {
     let [caretOffset, selectedTextLength] = getCurrentCaretPosition(event.target)
     let inputLen = event.target.innerText.length
     if (event.target.innerText[inputLen-1] === "\n") {

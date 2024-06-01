@@ -15,18 +15,19 @@ export function changePrevTokensHighlightColor(index: number, highlightedCode: H
   }
 }
 
-export function getNewTokenType(token: string) {
-  let currentTokenType = ""
+export function getNewTokenType(token: string, currentTokenType: string) {
   if (token[0] === "*") {
     currentTokenType = "emphasis|strong"
-  }else currentTokenType = "plain text"
+  }else if (currentTokenType !== "escape sequence") {
+    currentTokenType = "plain text"
+  }
   return currentTokenType;
 }
 
 /* Changes the highlight color of tokens that have already been highlighted */
-export default function changeInvalidHighlightColor(token: string, index: number, highlightedCode: HTMLElement[]) {
+export default function changeInvalidHighlightColor(token: string, currentTokenType: string, index: number, highlightedCode: HTMLElement[]) {
   if (token[0] !== ' ' && token[0] !== '\n') {
     changePrevTokensHighlightColor(index, highlightedCode);
   }
-  return getNewTokenType(token)
+  return getNewTokenType(token, currentTokenType)
 }

@@ -95,10 +95,9 @@ function highlightedJsToken(tokenType:string, token:string) {
 }
 
 // Generates a CODE HTML Element with a unique styling for a specific token type
-export default function highlightedToken(tokenType:string, token:string, language: string) {
-  if (!language || language === "text") {
-    return highlightedMarkDownToken(tokenType, token)
-  }else if (language === "js") {
+export default function highlightedToken(tokenType:string, token:string, language: string) : HTMLElement {
+  if (language === "js") {
     return highlightedJsToken(tokenType, token)
   }
+  return highlightedMarkDownToken(tokenType, token)
 }
