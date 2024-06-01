@@ -1,5 +1,23 @@
 import getHTMLTokenType from "./html_tokenizer"
 
+function checkIfCharIsInEscapeSequence(char: string, token: string, prevTokenType: any, currTokenType: string) {
+  if (char === '\\' && token !== '\\') {
+    if (!prevTokenType) {
+      // the goal is to create a new escape sequence token starting with '\'
+      // if prevTokenType is not null, that goal is already accomplished
+      prevTokenType = currTokenType;
+    }
+    currTokenType = "escape sequence"
+  }else if (token === '\\') {
+    prevTokenType = null
+    if (currTokenType !== "plain text" && currTokenType !== "link address") {
+      // char is a special character. No special character to be escaped inside link address
+      currTokenType = "escape sequence" // highlight char as escaped
+    }
+  }
+  return [prevTokenType, currTokenType];
+}
+
 /* Checks if a character is part of a link address or html quoted value.
   Mostly prevents special characters from being highlighted as special. */
 function getIfCharInUndelimitedTokenType(char: string, token: string, linkState: string | null, currTokenType: string | null) {
@@ -13,12 +31,15 @@ function getIfCharInUndelimitedTokenType(char: string, token: string, linkState:
   }else if (linkState === "opened link address") {
     if (char == ')') { // end of "link address"
       prevTokenType = currTokenType
+      if (currTokenType !== "escape sequence" || token.length === 2) {
+        linkState = null;
+      }
       currTokenType = "link delimiter";
-      linkState = null;
-    }else if (currTokenType !== "link address") { // Prevents switching category from link address to link address
+    }else if (currTokenType !== "link address") {
       prevTokenType = currTokenType
       currTokenType = "link address";
     }
+    [prevTokenType, currTokenType] = checkIfCharIsInEscapeSequence(char, token, prevTokenType, currTokenType as string);
     return [prevTokenType, currTokenType, linkState] 
   }
   return []
@@ -118,18 +139,6 @@ export default function getInlineElementTokenType(char: string, token: string, l
   if (!inHTML) {
     [prevTokenType, currTokenType] = checkIfCharIsInEscapeSequence(char, token, prevTokenType, currTokenType as string)
   }
+  // console.log([prevTokenType, token, currTokenType, char]);
   return [prevTokenType, currTokenType, linkState]
-}
-
-function checkIfCharIsInEscapeSequence(char: string, token: string, prevTokenType: any, currTokenType: string) {
-  if (char === '\\' && token !== '\\') {
-    prevTokenType = currTokenType
-    currTokenType = "escape sequence"
-  }else if (token === '\\') {
-    prevTokenType = null
-    if (currTokenType !== "plain text") { // char is a special character     
-      currTokenType = "escape sequence" // highlight char as escaped
-    }
-  }
-  return [prevTokenType, currTokenType];
 }

@@ -22,7 +22,7 @@ function styleCode(token: string, classStr: string) {
 
 function highlightedMarkDownToken(tokenType:string, token:string) {
   if (tokenType === "escape sequence") {
-    return styleCode(token, "text-pink-300")
+    return styleCode(token, "text-indigo-200")
   }else if (tokenType === "block list" || tokenType === "block list 1"){
     return styleCode(token, "text-amber-500")
   }else if (tokenType === "ordered list item") {
