@@ -6,7 +6,7 @@ const operators = ["...", "in", "new", '~', '+', '!', '?', '%', '-', '/', '*', '
 const keywords = [
   'let', 'const', 'var', 'from', 'import', 'export', 'default', 'function', "do", 'async', "delete",
   'await', 'return', 'if', 'else', 'for', 'class', "=>", "while", "break", "continue", "default",
-  "super", "extends", "instanceof", "switch", "case", "finally", "catch", "throw", "debugger"
+  "super", "extends", "instanceof", "switch", "case", "finally", "catch", "throw", "debugger", "yield"
 ]
 
 // js keyWords since it's the only supported language for now
@@ -40,19 +40,17 @@ function highlightedMarkDownToken(tokenType:string, token:string) {
   }else if (tokenType === "html attr assignment") {
     return styleCode(token, "text-gray-200")
   }else if (tokenType === "value") {
-    return styleCode(token, "text-lime-400")
+    return styleCode(token, "text-emerald-400")
   }else if (tokenType === "tag name") {
     return styleCode(token, "text-red-400")
   }else if (tokenType === "inline code body") {
     return styleCode(token, "text-white bg-slate-600")
   }else if (tokenType === "code delimiter"){
     return styleCode(token, "text-slate-400")
-  }else if (tokenType === "plain text") {
-    return styleCode(token, "text-white")
   }else if (tokenType === "attribute name") {
     return styleCode(token, "text-purple-400")
   }
-  return styleCode(token, "text-white")
+  return styleCode(token, "text-gray-100") // token is "plain-text"
 }
 
 function highlightedJsToken(tokenType:string, token:string) {
@@ -67,16 +65,16 @@ function highlightedJsToken(tokenType:string, token:string) {
     return styleCode(token, "text-lime-200")
   }else if (tokenType === "escape sequence") { 
     return styleCode(token, "text-amber-300")
-  }else if (keywords.includes(strippedToken)) {
-    return styleCode(token, "text-purple-400")
-  }else if (keywordsValues.includes(strippedToken)) {
-    return styleCode(token,"text-red-400" )
   }else if (tokenType === "operator" || operators.includes(token.trim())) {
     return styleCode(token, "text-orange-500 font-")
   }else if (tokenType === "delimiter") {
     return styleCode(token, "text-zinc-200")
   }else if (tokenType === "possible function call" && !(/^[\d#]/).test(token)) {
     return styleCode(token, "text-sky-500")
+  }else if (keywords.includes(strippedToken)) {
+    return styleCode(token, "text-fuchsia-400")
+  }else if (keywordsValues.includes(strippedToken)) {
+    return styleCode(token,"text-red-400" )
   }else { // check if token is a javascript number type
 
     // All non-greedy matching n at the end of each regex is in case of the bigInt data type in js.

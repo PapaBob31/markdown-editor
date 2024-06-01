@@ -1,19 +1,17 @@
 import getHTMLTokenType from "./html_tokenizer"
 
-// Checks if char (character) parameter indicates an inline html element
-export default function getInlineElementTokenType(char: string, token: string, linkState: string | null, currTokenType: string | null, inHTML: boolean) {
+/* Checks if a character is part of a link address or html quoted value.
+  Mostly prevents special characters from being highlighted as special. */
+function getIfCharInUndelimitedTokenType(char: string, token: string, linkState: string | null, currTokenType: string | null) {
   let prevTokenType = null;
 
-  if (linkState === "closed link text" && char !== '(') {
-    linkState = null
-  }
-
   if (currTokenType === "value" && ("'\"").includes(token[0])) { // current token type is a quoted html attribute value
-    if (token.length === 1 || (token[0] !== token[token.length-1])) { // it has been closed with the appropriate quote
-      return [prevTokenType, currTokenType, linkState] // return early as char will always be part of the current token type
+    if (token.length === 1 || (token[0] !== token[token.length-1])) { // it hasn't been closed with the appropriate quote
+      // return early as char will always be part of the current token type
+      return [prevTokenType, currTokenType, linkState]
     }
   }else if (linkState === "opened link address") {
-    if (char == ')') { // link delimiter token category was just found
+    if (char == ')') { // end of "link address"
       prevTokenType = currTokenType
       currTokenType = "link delimiter";
       linkState = null;
@@ -22,6 +20,54 @@ export default function getInlineElementTokenType(char: string, token: string, l
       currTokenType = "link address";
     }
     return [prevTokenType, currTokenType, linkState] 
+  }
+  return []
+}
+
+/* Checks and updates token category if character starts a html tag 
+  provided the char itself is not enclosed in or part of an html tag*/
+function getTagStartingCharacters(char: string, currTokenType: string, inHTML: boolean) {
+  let prevTokenType = null;
+
+  if (char === '<') {
+    prevTokenType = currTokenType;
+    currTokenType = "tag delimiter"
+  }else if (inHTML && currTokenType !== "plain text") {
+  // char is enclosed inside html tags. checking if token category prevents highlighting consecutive plaintext characters as seperate
+    prevTokenType = currTokenType
+    currTokenType = "plain text" // 
+  }
+
+  return [prevTokenType, currTokenType]
+}
+
+/* Checks and updates token category if a character ends or is part of a token that ends an html tag */
+function getTagEndingCharacters(char: string, token: string, currTokenType: string) {
+  let prevTokenType = null;
+
+  if (char === '/' && currTokenType !== "tag delimiter"){ // so it doesn't interfere with potential "</" token
+    prevTokenType = currTokenType // results in a '/' token so we can easily check for closing tag like '/>' later
+  }else if (char === '>') {
+    if (token !== '/') {
+      prevTokenType = currTokenType
+    }
+    currTokenType = "tag delimiter"
+  }
+
+  return [prevTokenType, currTokenType]
+}
+
+// Checks if char (character) parameter indicates an inline html element
+export default function getInlineElementTokenType(char: string, token: string, linkState: string | null, currTokenType: string | null, inHTML: boolean) {
+  let prevTokenType = null;
+
+  if (linkState === "closed link text" && char !== '(') {
+    linkState = null
+  }
+
+  const stateValues = getIfCharInUndelimitedTokenType(char, token, linkState, currTokenType)
+  if (stateValues.length === 3) {
+    return stateValues
   }
 
   /* change prevTokenType ahead in order to prevent repetition of code
@@ -61,28 +107,14 @@ export default function getInlineElementTokenType(char: string, token: string, l
     prevTokenType = null
   }
 
-  if (notInsideTag) {
-    if (char === '<') {
-      if (token === '<') {
-        prevTokenType = "plain text"
-      }else prevTokenType = currTokenType;
-      currTokenType = "tag delimiter"
-    }else if (inHTML && currTokenType !== "plain text") {
-      prevTokenType = currTokenType
-      currTokenType = "plain text"
-    }
-  }else { // single tag entity hasn't been closed by an appropriate delimiter
-    if (char === '/' && currTokenType !== "tag delimiter"){ // so it doesn't interfere with "</" types
-      prevTokenType = currTokenType
-      currTokenType = "attribute name"
-    }else if (char === '>') {
-      if (token !== '/') {
-        prevTokenType = currTokenType
-      }
-      currTokenType = "tag delimiter"
+  if (!prevTokenType) { // current character's token category hasn't been determined yet
+    if (notInsideTag){
+      [prevTokenType, currTokenType] = getTagStartingCharacters(char, currTokenType as string, inHTML)
+    }else { // single tag entity hasn't been closed by an appropriate delimiter
+      [prevTokenType, currTokenType] = getTagEndingCharacters(char, token, currTokenType as string)
     }
   }
-
+  
   if (!inHTML) {
     [prevTokenType, currTokenType] = checkIfCharIsInEscapeSequence(char, token, prevTokenType, currTokenType as string)
   }
@@ -95,8 +127,8 @@ function checkIfCharIsInEscapeSequence(char: string, token: string, prevTokenTyp
     currTokenType = "escape sequence"
   }else if (token === '\\') {
     prevTokenType = null
-    if (currTokenType !== "plain text") {      
-      currTokenType = "escape sequence"
+    if (currTokenType !== "plain text") { // char is a special character     
+      currTokenType = "escape sequence" // highlight char as escaped
     }
   }
   return [prevTokenType, currTokenType];

@@ -11,8 +11,9 @@ import getInlineElementTokenType from "./markdown_inline_tokenizer"
 const TAB_TO_SPACES = 2
 
 
-/** Tokenizes a markdown text stream and returns an array containing A nested array of highlighted tokens,
- * no of lines in the text stream and 2 other useful items related to the caret offset in the token
+/** Tokenizes a markdown text stream and returns an array containing A nested array of highlighted tokens, number
+ * of lines in the text stream and 2 other useful items related to the caret offset
+ * NOTE: An highlighted token is an html CODE element containing a token and it's styled depending on the token it contains
  * @param text: the markdown text stream to be highlighted
  * @param newCaretOffset: the caret offset relative to the text stream
  **/
@@ -95,6 +96,34 @@ function Number({number}:{number: string}) {
   return <div className="text-gray-400 text-right">{number}</div>
 }
 
+function modifyText(textStream: string, event: React.KeyboardEvent) : [string, number]|[] {
+  let caretOffset, selectedTextLength;
+  if (event.key === "Enter") {
+    event.preventDefault();
+    [caretOffset, selectedTextLength] = getCurrentCaretPosition(event.target as HTMLElement)
+    if (textStream === "") {
+      /*I don't use innertext because different browsers implement different behaviours with innerText. For example:
+      getting innerText after Enter Key press on empty contentEditable Element return '\n\n\n' in chrome but '\n\n' in firefox*/
+      textStream = '\n\n'
+    }else {
+      // Again, This is done cause of different browser behaviour concerning innerText when new line is encountered
+      let stl = selectedTextLength
+      textStream = textStream.slice(0, caretOffset) + "\n" + textStream.slice(caretOffset+stl, textStream.length)
+    }
+    caretOffset++
+    if (caretOffset === textStream.length) {
+      textStream += "\n"
+    }
+  }else if (event.key === "Tab") {
+    event.preventDefault();
+    [caretOffset, selectedTextLength] = getCurrentCaretPosition(event.target as HTMLElement)
+    let stl = selectedTextLength
+    textStream = textStream.slice(0, caretOffset) + (" ").repeat(TAB_TO_SPACES) + textStream.slice(caretOffset+stl, textStream.length)
+    caretOffset+=TAB_TO_SPACES
+  }else return [];
+  return [textStream, caretOffset];
+}
+
 export default function CodeEditor() {
   const [numberOfLines, setNumberOfLines] = useState(1)
   const localValue = useRef("")
@@ -109,29 +138,10 @@ export default function CodeEditor() {
   }
 
   function interceptKey(event: React.KeyboardEvent){
-    let caretOffset, selectedTextLength;
-    if (event.key === "Enter") {
-      event.preventDefault();
-      [caretOffset, selectedTextLength] = getCurrentCaretPosition(event.target as HTMLElement)
-      if (localValue.current === "") {
-        /*I don't use innertext because different browsers implement different behaviours with innerText. For example:
-        getting innerText after Enter Key press on empty contentEditable Element return '\n\n\n' in chrome but '\n\n' in firefox*/
-        localValue.current = '\n\n'
-      }else {
-        // Again, This is done cause of different browser behaviour concerning innerText when new line is encountered
-        let stl = selectedTextLength
-        localValue.current = localValue.current.slice(0, caretOffset) + "\n" + localValue.current.slice(caretOffset+stl, localValue.current.length)
-      }
-      caretOffset++
-      if (caretOffset === localValue.current.length) {
-        localValue.current += "\n"
-      }
-    }else if (event.key === "Tab") {
-      event.preventDefault();
-      [caretOffset, selectedTextLength] = getCurrentCaretPosition(event.target as HTMLElement)
-      let stl = selectedTextLength
-      localValue.current = localValue.current.slice(0, caretOffset) + (" ").repeat(TAB_TO_SPACES) + localValue.current.slice(caretOffset+stl, localValue.current.length)
-      caretOffset+=TAB_TO_SPACES
+    let modifiedData = modifyText(localValue.current, event)
+    let caretOffset;
+    if (modifiedData.length === 2) {
+      [localValue.current, caretOffset] = modifiedData;
     }else return;
 
     let [htmlTextList, updatedNumber, caretElement, newCaretOffset] = highlightMarkDown(localValue.current, caretOffset)

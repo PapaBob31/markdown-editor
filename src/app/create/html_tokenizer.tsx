@@ -23,7 +23,7 @@ export default function getHTMLTokenType(char: string, token: string, currTokenT
       currTokenType = "attribute name"
     }
   }else if (currTokenType === "html attr assignment") {
-    if (char !== '/' && char !== '>') { // '/' and '>' can't be matched cause they could be part of the tag's delimiter
+    if (char !== '>') { // '>' can't be matched cause it could be part of the tag's delimiter
       prevTokenType = currTokenType
       currTokenType = "value"
     }

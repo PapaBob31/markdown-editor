@@ -66,7 +66,7 @@ export default function getCodeBlockTokenTypes(char: string, token: string, curr
     if (codeBlockState.language === "js") {
       [prevTokenType, currentTokenType, codeBlockState.openedContainer] = getJsTokenType(char, token, currentTokenType, codeBlockState.openedContainer)
     }else if (codeBlockState.language === "text") {
-      [prevTokenType, currentTokenType] = getPlainText(char, token, currentTokenType)
+      [prevTokenType, currentTokenType] = getPlainTextTokens(char, token, currentTokenType) as string[]
     }
   }
   return [prevTokenType, currentTokenType, codeBlockState]
