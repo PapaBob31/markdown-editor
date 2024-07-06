@@ -69,12 +69,12 @@ function highlightedJsToken(tokenType:string, token:string) {
     return styleCode(token, "text-orange-500 font-")
   }else if (tokenType === "delimiter") {
     return styleCode(token, "text-zinc-200")
-  }else if (tokenType === "possible function call" && !(/^[\d#]/).test(token)) {
-    return styleCode(token, "text-sky-500")
   }else if (keywords.includes(strippedToken)) {
     return styleCode(token, "text-fuchsia-400")
   }else if (keywordsValues.includes(strippedToken)) {
     return styleCode(token,"text-red-400" )
+  }else if (tokenType === "possible function call" && !(/^[\d#]/).test(token)) {
+    return styleCode(token, "text-sky-500")
   }else { // check if token is a javascript number type
 
     // All non-greedy matching n at the end of each regex is in case of the bigInt data type in js.

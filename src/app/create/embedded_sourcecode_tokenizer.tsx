@@ -5,14 +5,14 @@ const acceptedLanguages = ["js"]
 export default function getCodeBlockTokenTypes(char: string, token: string, currentTokenType: string, codeBlockState: any) {
   let prevTokenType: any = null
   
-  if (codeBlockState.embeddedType === "code span") {
+  if (codeBlockState.embeddedType === "code span" || !codeBlockState.language) { // code span or falsely assumed code block
     if (token === codeBlockState.delimiter) {
       codeBlockState = {language: "", openedContainer: "", delimiter: "", embeddedType: ""}
       currentTokenType = "code delimiter"
     }
   }else if (token[0] === '\n') { // token is the first token on a new line as indicated by the token's first character
     if ((token.slice(1, token.length) === codeBlockState.delimiter) && char === '\n') {
-    // rest of the token is equal to codeBlockState.delimiter and it's the only token on a new line
+      // token at the beginning of a new line is equivalent to codeBlockState.delimiter
       codeBlockState = {language: "", openedContainer: "", delimiter: "", embeddedType: ""}
       currentTokenType = "code delimiter"
     }
@@ -52,7 +52,6 @@ export default function getCodeBlockTokenTypes(char: string, token: string, curr
         }else if (char !== '\n'){
           prevTokenType = currentTokenType
           if (token.length <= 2) {
-
             // incase it was set as a code block before.
             codeBlockState.embeddedType = "code span" // backticks making up a code block delimiter must be at least 3
           }
