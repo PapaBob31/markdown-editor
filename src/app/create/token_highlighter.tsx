@@ -65,14 +65,14 @@ function highlightedJsToken(tokenType:string, token:string) {
     return styleCode(token, "text-lime-200")
   }else if (tokenType === "escape sequence") { 
     return styleCode(token, "text-amber-300")
-  }else if (tokenType === "operator" || operators.includes(token.trim())) {
-    return styleCode(token, "text-orange-500 font-")
   }else if (tokenType === "delimiter") {
     return styleCode(token, "text-zinc-200")
   }else if (keywords.includes(strippedToken)) {
     return styleCode(token, "text-fuchsia-400")
   }else if (keywordsValues.includes(strippedToken)) {
     return styleCode(token,"text-red-400" )
+  }else if (tokenType === "operator" || operators.includes(token.trim())) {
+    return styleCode(token, "text-orange-500 font-")
   }else if (tokenType === "possible function call" && !(/^[\d#]/).test(token)) {
     return styleCode(token, "text-sky-500")
   }else { // check if token is a javascript number type

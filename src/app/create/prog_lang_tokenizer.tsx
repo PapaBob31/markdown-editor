@@ -197,6 +197,3 @@ export function getPlainTextTokens(char: string, token: string, currTokenType: s
   }
   return [prevTokenType, currTokenType]
 }
-
-// BUGS
-// code block delimiter, brackets turn everything into a fn call

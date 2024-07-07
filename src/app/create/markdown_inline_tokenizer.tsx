@@ -53,10 +53,9 @@ function getTagStartingCharacters(char: string, currTokenType: string, inHTML: b
   if (char === '<') {
     prevTokenType = currTokenType;
     currTokenType = "tag delimiter"
-  }else if (inHTML && currTokenType !== "plain text") {
-  // char is enclosed inside html tags. checking if token category prevents highlighting consecutive plaintext characters as seperate
+  }else if (inHTML && currTokenType !== "plain text") { // char is enclosed inside html tags
     prevTokenType = currTokenType
-    currTokenType = "plain text" // 
+    currTokenType = "plain text"
   }
 
   return [prevTokenType, currTokenType]
@@ -139,6 +138,5 @@ export default function getInlineElementTokenType(char: string, token: string, l
   if (!inHTML) {
     [prevTokenType, currTokenType] = checkIfCharIsInEscapeSequence(char, token, prevTokenType, currTokenType as string)
   }
-  // console.log([prevTokenType, token, currTokenType, char]);
   return [prevTokenType, currTokenType, linkState]
 }

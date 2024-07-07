@@ -2,6 +2,12 @@
 // Checks if a character falls into a token category that's part of an html tag
 export default function getHTMLTokenType(char: string, token: string, currTokenType: string|null) {
   let prevTokenType: any = null
+  const htmlTokenTypes = [
+    "tag delimiter", "value", "html whitespace", "attribute name", "tag name", "html attr assignment", "invalid html"]
+
+  if (!htmlTokenTypes.includes(currTokenType as string)) {
+    return [prevTokenType, currTokenType, true]
+  }
   let endOfTag = false;
 
   if (currTokenType === "tag delimiter") { // token actually delimits a tag and not a plain text in token format
@@ -9,7 +15,7 @@ export default function getHTMLTokenType(char: string, token: string, currTokenT
       endOfTag = true;
       prevTokenType = currTokenType
     }else if ((/\w|\d/).test(char)) { // character following '<' is alphanumeric as in the proper syntax for html tags
-      if (token === '<' || token == '</') {
+      if (token === '<' || token === '</') {
         prevTokenType = currTokenType
         currTokenType = "tag name"
       }
@@ -17,27 +23,35 @@ export default function getHTMLTokenType(char: string, token: string, currTokenT
       endOfTag = true;
       currTokenType = "plain text"
     }
-  }else if (currTokenType === "tag name" || currTokenType === "value") {
-    if (char === ' ') {
+  }else if ((" \n").includes(char)) {
+    if (currTokenType !== 'html whitespace') {
       prevTokenType = currTokenType
-      currTokenType = "attribute name"
-    }
-  }else if (currTokenType === "html attr assignment") {
-    if (char !== '>') { // '>' can't be matched cause it could be part of the tag's delimiter
-      prevTokenType = currTokenType
-      currTokenType = "value"
+      currTokenType = "html whitespace"
     }
   }else if (currTokenType === "attribute name") {
     if (char === '=') {
       prevTokenType = currTokenType
       currTokenType = "html attr assignment"
     }
-  }else { // The current character is not part of an html tag
-    endOfTag = true
-    prevTokenType = currTokenType
+  }else if (currTokenType === "html attr assignment") {
+    if (char !== '>') { // '>' can't be matched cause it could be part of the tag's delimiter
+      prevTokenType = currTokenType
+      currTokenType = "value"
+    }
+  }else if (currTokenType === "html whitespace" || 
+    ( currTokenType === "value" && ("\"'").includes(token[0]) ) ||
+    currTokenType === "invalid html") {
+    if (!("\"'=>").includes(char)) {
+      prevTokenType = currTokenType
+      currTokenType = "attribute name"
+    }else if (currTokenType !== "invalid html" && char !== '>') {
+      prevTokenType = currTokenType
+      currTokenType = "invalid html"
+    }
   }
   return [prevTokenType, currTokenType, endOfTag];
 }
+  
 
 /**
 * Updates unclosed html tags
