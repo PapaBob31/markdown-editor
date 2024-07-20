@@ -174,8 +174,7 @@ export default function CodeEditor() {
       <div className="text-gray-200 px-2 leading-tight">{generateNumForLines()}</div>
        {/*pre element's content isn't stored in state because Component's with `contentEditable` can't contain `children` managed by React*/} 
        <pre contentEditable spellCheck="false" onInput={reStyleCode} ref={preElement} onKeyDown={interceptKey}
-        className="block leading-tight text-white pl-2 caret-amber-600 outline-none flex-grow">
-       </pre>
+        className="block leading-tight text-white pl-2 caret-amber-600 outline-none flex-grow"></pre>
       </div>
       <div className="w-full h-12"></div>
     </section>

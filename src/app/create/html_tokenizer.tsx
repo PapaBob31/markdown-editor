@@ -5,7 +5,7 @@ export default function getHTMLTokenType(char: string, token: string, currTokenT
   const htmlTokenTypes = [
     "tag delimiter", "value", "html whitespace", "attribute name", "tag name", "html attr assignment", "invalid html"]
 
-  if (!htmlTokenTypes.includes(currTokenType as string)) {
+  if (!htmlTokenTypes.includes(currTokenType as string)) { // character that's about to be parsed is not part of an html tag
     return [prevTokenType, currTokenType, true]
   }
   let endOfTag = false;
