@@ -1,5 +1,7 @@
+"use client"
 
 // Make it Work. Make it pretty. Make it fast
+import { useRef, useEffect } from "react"
 
 interface HtmlNode {
 	parentNode: HtmlNode;
@@ -7,26 +9,24 @@ interface HtmlNode {
 	textContent?: string;
 	children: HtmlNode[];
 	indentLevel?: number;
+	fenceLength?: number;
 }
 
-
-function getHtmlElementOf(node: HtmlNode) {
-	let htmlEl = document.createElement(node.nodeName);
-	if (node.textContent){
-		htmlEl.textContent = node.textContent;
-	}else if (node.children.length == 0) {
-		return htmlEl;
-	}else if (node.children.length > 0) {
-		node.children.forEach((node) => htmlEl.append(getHtmlElementOf(node)))
+function getHtmlNode(htmlNode: HtmlNode) {
+	let htmlEl: HTMLElement;
+	if (htmlNode.nodeName === "fenced code block" || htmlNode.nodeName === "indented code block") {
+		htmlEl = document.createElement("pre");
+		htmlEl.textContent = htmlNode.textContent as string;
+	}else if (htmlNode.nodeName === "paragraph") {
+		htmlEl = document.createElement("p");
+		htmlEl.textContent = htmlNode.textContent as string;
+	}else {
+		htmlEl = document.createElement(htmlNode.nodeName);
+		htmlNode.children.forEach(node => {
+			htmlEl.appendChild(getHtmlNode(node));
+		})
 	}
 	return htmlEl;
-}
-
-function constructHtmlTree(htmlNodes: HtmlNode[]) {
-	const main = document.createElement("main");
-	for (let node of htmlNodes) {
-		main.append(getHtmlElementOf(node));
-	}
 }
 
 function lineIsHorizontalRule(line: string) {
@@ -35,7 +35,6 @@ function lineIsHorizontalRule(line: string) {
 	if (!hrData) {
 		return false
 	}
-
 	for (let char of line) {
 		if (char === hrData[1]) {
 			charCount++;
@@ -52,76 +51,149 @@ function getBlockNodes(line: string): [string, number] {
 
 	if (markerPos > -1) {
 		nodeName = "blockquote"
-	}else if (line.startsWith("    ")) {
+	}else if ((/^\s{4,}\S/).test(line)) {
 		nodeName = "indented code block";
-		markerPos = -1; // this variable is irrelevant when the condition above is true
+		markerPos = line.search(/\S/)
 	}else if ((/^\s*```/).test(line)) {
 		markerPos = line.indexOf('`');
 		nodeName = "fenced code block";
 	}else if (lineIsHorizontalRule(line)){ // hr
 		nodeName = "hr";
+		markerPos = line.search(/\S/)
 	}else {
-		let listMarkerDetails = (/(\s*)(\d\.)(\s+)/).exec(line) || (/(\s*)(-|\+|\*)(\s+)/).exec(line);
-		if (listMarkerDetails && listMarkerDetails[1].length < 4 && listMarkerDetails[3].length <= 4) {
-			markerPos = listMarkerDetails[1].length + listMarkerDetails[2].length - 1;
+		let listMarkerDetails = (/(\s*)(\d{1,9}\.)(\s+)/).exec(line) || (/(\s*)(-|\+|\*)(\s+)/).exec(line);
+		if (listMarkerDetails && listMarkerDetails[1].length < 4) {
+			markerPos = listMarkerDetails[1].length > 0 ? listMarkerDetails[1].length - 1 : listMarkerDetails[1].length;
 			if (("+-*").includes(listMarkerDetails[2])) {
-				nodeName = "unordered list"
-			}else nodeName = "ordered list";
+				nodeName = "ul-li"
+			}else nodeName = "ol-li";
 		}else nodeName = "paragraph";
 	}
 	
 	return [nodeName, markerPos];
 }
 
-function getClosestListItem(node: HtmlNode): HtmlNode|null {
-	if (node.nodeName === "main") {
+function getNearestAncestor(node: HtmlNode, ancestorNodeName: string): HtmlNode|null {
+	if (!node.parentNode) {
 		return null
-	}if (node.nodeName === "li") {
-		return node;
-	}else return getClosestListItem(node.parentNode)
+	}else if (node.parentNode.nodeName === ancestorNodeName) {
+		return node.parentNode;
+	}else return getNearestAncestor(node.parentNode, ancestorNodeName)
+}
+
+function getValidAncestorWithSameIndentLevel(node: HtmlNode, indentLevel: number): HtmlNode{
+	const listNode = getNearestAncestor(node, "li") // cause only list items are supposed to have indentation
+	if (!listNode) {
+		return getNearestAncestor(node, "main") as HtmlNode;
+	}else if ((indentLevel - listNode.indentLevel) < 3) {
+		return listNode.parentNode;	
+	}else {
+		return getValidAncestorWithSameIndentLevel(listNode, indentLevel);
+	}
 }
 
 function parseLine(line: string, lastOpenedNode: HtmlNode) {
-	let [nodeName, markerPos] = getBlockNodes(line);
-	if (markerPos >= 3 && nodeName !== "paragraph") {
-		let nearestListItem:HtmlNode = getClosestListItem(lastOpenedNode) as HtmlNode;
-		if ((nearestListItem.indentLevel as number) === markerPos && nodeName !== "indented code block") {
-			lastOpenedNode = nearestListItem;
-		}
+	let nodeName, markerPos = -1;
+	[nodeName, markerPos] = getBlockNodes(line);
+	let parentNodeName:string = "";
+
+	if (nodeName === "ol-li" || nodeName === "ul-li") {
+		if (nodeName === "ol-li") {
+			parentNodeName = "ol"
+		}else parentNodeName = "ul"
 	}
 
+	if (markerPos > 0) {
+		let validAncestor = getValidAncestorWithSameIndentLevel(lastOpenedNode, markerPos);
+		if (validAncestor.nodeName === "main" && markerPos <= 2) {
+			if (parentNodeName && validAncestor.children[validAncestor.children.length - 1].nodeName !== parentNodeName){
+				validAncestor.children.push({parentNode: validAncestor, nodeName: parentNodeName, children: []})
+				lastOpenedNode = validAncestor.children[validAncestor.children.length - 1];
+			}else lastOpenedNode = validAncestor;
+			console.log(validAncestor.children, 9, nodeName);
+		}else if (validAncestor.nodeName === "main" && markerPos > 2) {
+			if (markerPos >= 4 && lastOpenedNode.nodeName !== "paragraph") {
+				nodeName = "indented code block";
+			}else nodeName = "paragraph";
+			lastOpenedNode = validAncestor;
+		}else if (validAncestor.nodeName == "li") {
+			let lastIndex = validAncestor.children.length - 1;
+			if (nodeName !== "ol-li" && nodeName !== "ul-li") {
+				lastOpenedNode = validAncestor;
+			}else if (lastIndex < 0 || validAncestor.children[lastIndex].nodeName !== parentNodeName) {
+				validAncestor.children.push({parentNode: validAncestor, nodeName: parentNodeName, children: []})
+			}
+			lastOpenedNode = validAncestor.children[validAncestor.children.length - 1]	
+		}
+	}else {
+		if (parentNodeName && lastOpenedNode.children.length > 0) {
+
+		}
+		if (lastOpenedNode.children.length === 0 && parentNode){
+			lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName: parentNodeName, children: []})
+		}
+		if (parentNodeName && lastOpenedNode.children[lastOpenedNode.children.length - 1].nodeName !== parentNodeName){
+			lastOpenedNode = lastOpenedNode.children[lastOpenedNode.children.length - 1];
+		}
+	}
+	
+	if (lastOpenedNode.nodeName === "fenced code block") {
+		if (nodeName === "fenced code block") {
+			let lineDetails = (/^\s*(`+)\s*$/).exec(line);
+			if (lineDetails && lineDetails[0].length >= (lastOpenedNode.fenceLength as any)
+				&& (markerPos - (lastOpenedNode.indentLevel as number) <= 2)) {
+				lastOpenedNode = lastOpenedNode.parentNode;
+			}
+		}	
+		return lastOpenedNode;
+	}else if (lastOpenedNode.nodeName === "indented code block") {
+		if (markerPos < (lastOpenedNode.indentLevel as number)) {
+			lastOpenedNode = lastOpenedNode.parentNode;
+		}else lastOpenedNode.textContent += ('\n' + line);
+	}
+
+	// indented code blocks algos should be checked for possible bugs
 	if (nodeName === "indented code block") {
-		if (lastOpenedNode.nodeName === "paragraph" || markerPos < 3) {
+		if (lastOpenedNode.nodeName === "paragraph") { // indented code blocks can't interrupt paragraphs
 			nodeName = "paragraph";
-		}else if (lastOpenedNode.nodeName === "indented code block"){
-			lastOpenedNode.textContent += ('\n' + line)
 		}else {
-			lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName, textContent: line, children: []})
+			let fenceDetails = (/(`+)/).exec(line);
+			lastOpenedNode.children.push(
+				{parentNode: lastOpenedNode, nodeName, indentLevel: markerPos, fenceLength: (fenceDetails as any[1]).length, children: []}
+			)
 			lastOpenedNode = lastOpenedNode.children[lastOpenedNode.children.length - 1];
 		}
 	}else if (nodeName === "hr") {
 		lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName, children: []})
 	}else if (nodeName === "blockquote") {
-		lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName: "blockquote", children: []})
-		lastOpenedNode = lastOpenedNode.children[lastOpenedNode.children.length - 1];
-		parseLine(line.slice(markerPos as number, line.length), lastOpenedNode)
-	}else if (nodeName === "fenced code block") { // work on this guy first then work on the output code next
+		if (lastOpenedNode.nodeName === "paragraph" && lastOpenedNode.parentNode.nodeName === "blockquote") {
+			nodeName = "paragraph";
+		}else {
+			lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName: "blockquote", children: []})
+			lastOpenedNode = lastOpenedNode.children[lastOpenedNode.children.length - 1];
+			lastOpenedNode = parseLine(line.slice(markerPos as number+1, line.length), lastOpenedNode)
+		}
+	}else if (nodeName === "fenced code block") {		
 		lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName, indentLevel: markerPos, children: []})
 		lastOpenedNode = lastOpenedNode.children[lastOpenedNode.children.length - 1];
-	}else if (nodeName === "ordered list" || nodeName === "unordered list") {
-		let spacesAfterMarker = line.slice(markerPos, line.length).match(/(\s*)/);
-		if (spacesAfterMarker && spacesAfterMarker.length < 4) {
-			lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName, indentLevel: markerPos + spacesAfterMarker.length, children: []})
-		}else if (spacesAfterMarker && spacesAfterMarker.length === 4){
-			lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName, indentLevel: markerPos + 1, children: []})
+	}else if (nodeName === "ol-li" || nodeName === "ul-li" ) { // list item TODO: lists nested inside blockquotes won' have proper indent details e.g > -
+		let fullWidth = line.match(/(\s*)(\S+)(\s*)/);
+		// TODO: properly calculate indent level by walking upwards through the tree looking for list ancestors to add their own indent leve;
+		if (fullWidth && fullWidth[2].length < 4) {
+			lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName: "li", indentLevel: markerPos + fullWidth[2].length, children: []})
+		}else if (fullWidth && fullWidth[2].length >= 4){
+			lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName: "li", indentLevel: markerPos + 1, children: []})
 		}
 		lastOpenedNode = lastOpenedNode.children[lastOpenedNode.children.length - 1];
-		parseLine(line.slice(markerPos as number, line.length), lastOpenedNode)
+		// console.log(line, nodeName, markerPos, fullWidth[1]);
+		lastOpenedNode = parseLine(line.slice(markerPos + fullWidth[2].length as number, line.length), lastOpenedNode);
 	}
 
 	if (nodeName === "paragraph") {
-		if (lastOpenedNode.nodeName === "paragraph") {
-			lastOpenedNode.textContent += ('\n' + line)
+		if (line.search(/\S/) == -1) {
+			if (lastOpenedNode.nodeName == "paragraph") {
+				lastOpenedNode = lastOpenedNode.parentNode;
+			}
 		}else {
 			lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName: "paragraph", textContent: line, children: []})
 			lastOpenedNode = lastOpenedNode.children[lastOpenedNode.children.length - 1];
@@ -133,30 +205,36 @@ function parseLine(line: string, lastOpenedNode: HtmlNode) {
 
 export default function Page({ params }: {params: {slug: string}}) {
 	// reference links aren't supported
+	const rootRef = useRef(null);
+	const preRef = useRef(null);
+	const root:HtmlNode = {parentNode: null as any, nodeName: "main", children: []}
+	useEffect(() => {
+		rootRef.current.appendChild(getHtmlNode(root));
+		preRef.current.textContent = rootRef.current.innerHTML;
+		console.log(root);
+	}, [])
 	const sampleText =
-	`
-	- List item 1
-	- List item 2
-	- List item 3 with paragraph
-	embedded in a list item
-		1. nested ordered list item inside the list item with a nested paragraph
-		2. I'm second sha. Incoming Blockquote
+`
+- List item 1
+- List item 2
+- List item 3 with paragraph
+embedded in a list item
+	1. nested ordered list item inside the list item with a nested paragraph
+	2. I'm second sha. Incoming Blockquote
 
-	>Blockquote of gfm markdown spec Which says 
-	>This line is part of the preceeding blockquote by virtue of the start symbol
-	And so is this line but by virtue of paragraph continuation
+>Blockquote of gfm markdown spec Which says 
+>This line is part of the preceeding blockquote by virtue of the start symbol
+And so is this line but by virtue of paragraph continuation
 
-	And I'm just a stand alone paragraph
-	`
+And I'm just a stand alone paragraph
+`;
 
 	const lines = sampleText.split('\n');
 	// I don't really know why I was able to cast null to any so come back to refactor
-	const root:HtmlNode = {parentNode: null as any, nodeName: "paragraph", children: []}
-	let lastOpenedNode: HtmlNode|null = root; 
+	let lastOpenedNode: HtmlNode = root; 
 
 	for (let line of lines) {
-		parseLine(line, lastOpenedNode);
-		
+		lastOpenedNode = parseLine(line, lastOpenedNode);
 	}
 	
 	/* inputStr = "I am a paragraph\n\nSo am I\nNot me Though\n\n#Iwish!\n\n\nI am a paragraph";
@@ -174,6 +252,11 @@ export default function Page({ params }: {params: {slug: string}}) {
 			return `<h${headerStr.length}>${headerBody}</h${headerStr.length}>`
 		}else return `<h${headerStr.length}></h${headerStr.length}>`
 	}
-	return <></>
+	return (
+		<section className="flex w-100">
+			<section className="w-1/2" ref={rootRef}></section>
+			<pre className="w-1/2" ref={preRef}></pre>
+		</section>
+	)
 }
 

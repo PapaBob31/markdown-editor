@@ -78,15 +78,15 @@ function highlightedJsToken(tokenType:string, token:string) {
   }else { // check if token is a javascript number type
 
     // All non-greedy matching n at the end of each regex is in case of the bigInt data type in js.
-    if ((/^\d+(\.?\d+)?n?$/).test(strippedToken)) { // token is a decimal literal
+    if ((/^\d+(?:\.?\d+)?n?$/).test(strippedToken)) { // token is a decimal literal
       return styleCode(token, "text-orange-300")
-    }else if ((/^\d+(\.\d+)?e|E\d+(\.\d+)?n?$/).test(strippedToken)) { // exponential literal
+    }else if ((/^\d+(?:\.\d+)?e|E\d+(?:\.\d+)?n?$/).test(strippedToken)) { // exponential literal
       return styleCode(token, "text-amber-300")
     }else if ((/^0o|O[0-7]+n?$/).test(strippedToken)) { // octal literal
       return styleCode(token, "text-yellow-300")
-    }else if ((/^0(x|X)[0-9A-Fa-f]+n?$/).test(strippedToken)) { // hexadecimal literal
+    }else if ((/^0(?:x|X)[0-9A-Fa-f]+n?$/).test(strippedToken)) { // hexadecimal literal
       return styleCode(token, "text-indigo-300")
-    }else if ((/^0(b|B)[01]+$/).test(strippedToken)) { // binary literal
+    }else if ((/^0(?:b|B)[01]+$/).test(strippedToken)) { // binary literal
       return styleCode(token, "text-yellow-200")
     }
   }
