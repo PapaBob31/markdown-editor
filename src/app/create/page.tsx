@@ -10,6 +10,9 @@ import { getOpenedHTMLTagsInfo } from "./html_tokenizer"
 import getInlineElementTokenType from "./markdown_inline_tokenizer"
 const TAB_TO_SPACES = 2
 
+/* TODO: 
+- Add horizontal rule support
+- Add link title support
 
 /** Tokenizes a markdown text stream and returns an array containing A nested array of highlighted tokens, number
  * of lines in the text stream and 2 other useful items related to the caret offset
