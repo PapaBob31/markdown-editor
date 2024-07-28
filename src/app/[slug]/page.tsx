@@ -7,13 +7,14 @@ interface HtmlNode {
 	parentNode: HtmlNode;
 	nodeName: string;
 	textContent?: string;
-	closed: boolean;
+	closed?: boolean;
 	children: HtmlNode[];
 	indentLevel?: number;
 	fenceLength?: number;
 	totalNested?: number; // for blockquotes
 	infoString?: string;
 	delimiter?: string;
+	startNo?: string;
 }
 
 function getHtmlNode(htmlNode: HtmlNode) {
@@ -49,47 +50,67 @@ function lineIsHorizontalRule(line: string) {
 	return false
 }
 
+function getInnerHtml(rootNode: HtmlNode, indentLevel: number):string {
+	let text = "";
+	const whiteSpace = ' '.repeat(indentLevel);
+	if (rootNode.nodeName === "paragraph") {
+		text = `${whiteSpace}<p>${rootNode.textContent}</p>\n`
+	}else if (rootNode.nodeName === "fenced code" || rootNode.nodeName === "indented code block") {
+		text = `${whiteSpace}<pre class=${rootNode.infoString || ""}>\n${whiteSpace+'  '}<code>${rootNode.textContent}\n${whiteSpace+'  '}</code>\n${whiteSpace}</pre>\n`
+	}else {
+		if (rootNode.nodeName === "ol") {
+			text = `${whiteSpace}<${rootNode.nodeName} start="${rootNode.startNo}">\n`	
+		}else text = `${whiteSpace}<${rootNode.nodeName}>\n`;
+
+		if (rootNode.nodeName === "li" && rootNode.children.length === 1) {
+			let onlyChild = rootNode.children[rootNode.children.length-1];
+			if (onlyChild.nodeName === "paragraph" && !(onlyChild.textContent as string).includes('\n')) {
+				text += onlyChild.textContent;
+			}else text += `${getInnerHtml(onlyChild, indentLevel+2)}`;
+		}else {
+			for (const childNode of rootNode.children) {
+				text += `${getInnerHtml(childNode, indentLevel+2)}`;
+			}
+		}
+		text += `${whiteSpace}</${rootNode.nodeName}>\n`
+	}
+	return text;
+}
+
 function getBlockNodes(line: string): [string, number] {
 	let nodeName;
 	let markerPos = line.slice(0,4).indexOf('>');
 
 	if (markerPos > -1) {
 		nodeName = "blockquote"
-	}else if ((/^\s{4,}\S/).test(line)) {
-		nodeName = "indented code block";
-		markerPos = line.search(/\S/)
 	}else if ((/^\s*```/).test(line)) {
 		markerPos = line.indexOf('`');
-		nodeName = "fenced code block";
+		nodeName = "code fence";
 	}else if (lineIsHorizontalRule(line)){ // hr
 		nodeName = "hr";
 		markerPos = line.search(/\S/)
+	}else if ((markerPos = line.search(/<\/?(?:\w|\d)./)) !== -1) {
+		nodeName = "html block"; // possibly
 	}else {
 		let listMarkerDetails = (/(\s*)(\d{1,9}(?:\.|\)))(\s+)/).exec(line) || (/(\s*)(-|\+|\*)(\s+)/).exec(line);
-		if (listMarkerDetails && listMarkerDetails[1].length < 4) {
+		if (listMarkerDetails) {
 			markerPos = listMarkerDetails[1].length > 0 ? listMarkerDetails[1].length - 1 : listMarkerDetails[1].length;
 			if (("+-*").includes(listMarkerDetails[2])) {
 				nodeName = "ul-li"
 			}else nodeName = "ol-li";
-		}else nodeName = "paragraph";
+		}else {
+			nodeName = "plain text";
+			markerPos = line.search(/\S/);
+		};
 	}
 	
 	return [nodeName, markerPos];
 }
 
-function getNearestAncestor(node: HtmlNode, ancestorNodeName: string): HtmlNode|null {
-	if (!node.parentNode) {
-		return null
-	}else if (node.parentNode.nodeName === ancestorNodeName) {
-		return node.parentNode;
-	}else return getNearestAncestor(node.parentNode, ancestorNodeName)
-}
-
-
 // get node's ancestor with the same level of indentation
 function getValidOpenedAncestor(node: HtmlNode, indentLevel: number): HtmlNode {
-	if (node.nodeName === "main" ||
-			node.nodeName === "li" && indentLevel >= (node.indentLevel as number)) {
+	if (node.nodeName === "main" || node.nodeName === "blockquote" ||
+			(node.nodeName === "li" && indentLevel >= (node.indentLevel as number))) {
 		return node;
 	}else {
 		return getValidOpenedAncestor(node.parentNode, indentLevel);
@@ -98,9 +119,9 @@ function getValidOpenedAncestor(node: HtmlNode, indentLevel: number): HtmlNode {
 
 // get node's list child with the same level of indentation as indentLevel
 function validListChild(node: HtmlNode, indentLevel: number): HtmlNode|null {
-	if (node.nodeName === "li" && node.indentLevel === indentLevel) {
+	if (node.nodeName === "li" && indentLevel - (node.indentLevel as number) >= 0 ) {
 		return node;
-	}else if (node.nodeName === "li" && node.children.length === 0) {
+	}else if (node.children.length === 0) {
 		return null
 	}else {
 		let lastChild = node.children[node.children.length - 1]; // cause only the last child can still be opened
@@ -118,19 +139,81 @@ function count(text:string, targetChar:string) {
 	return count;
 }
 
-function parseLine(line: string, lastOpenedNode: HtmlNode) {
-
-	let nodeName, markerPos = -1;
-	[nodeName, markerPos] = getBlockNodes(line);
-
-	if (lastOpenedNode.nodeName === "li" && nodeName !== "paragraph") {
-		let nearestValidAncestor = getValidOpenedAncestor(lastOpenedNode, markerPos)
-		let lastChild = lastOpenedNode.children[lastOpenedNode.children.length - 1];
-		if (lastOpenedNode !== nearestValidAncestor && nearestValidAncestor.nodeName === "main") {
-			lastOpenedNode.closed = true
+function getInnerMostOpenContainer(node:HtmlNode):HtmlNode|null {
+	if ((node.nodeName === "blockquote" || node.nodeName === "li") && !node.closed) {
+		let lastChildNode = node.children[node.children.length - 1];
+		if (lastChildNode && ["ul", "ol"].includes(lastChildNode.nodeName)){
+			return getInnerMostOpenContainer(lastChildNode);
 		}
-		if (nodeName !== "indented code block" && markerPos >= 4) nodeName = "indented code block";
-		lastOpenedNode = nearestValidAncestor;
+		return node;
+	}else if (node.nodeName === "ul" || node.nodeName === "ol") {
+		return getInnerMostOpenContainer(node.children[node.children.length - 1]);
+	}else return null;
+}
+
+function parseLine(line: string, lastOpenedNode: HtmlNode) {
+	if (line.search(/\S/) === -1) {
+		let lastOpenedContainer = getInnerMostOpenContainer(lastOpenedNode);
+		if (!lastOpenedContainer) {
+			lastOpenedContainer = lastOpenedNode;
+		}
+		if (lastOpenedContainer.nodeName === "blockquote") { // closing a blockquote closes all nested shi
+			lastOpenedContainer.closed = true;
+		}else {
+			let lastOpenedChild = lastOpenedContainer.children[lastOpenedContainer.children.length - 1]
+			if (!lastOpenedChild) {
+				return lastOpenedNode;
+			}else if (lastOpenedChild.nodeName === "paragraph" || lastOpenedChild.nodeName === "html block") {
+				lastOpenedChild.closed = true;
+			}else if (lastOpenedChild.nodeName === "li" && lastOpenedChild.children.length === 0) { // blank lines shouldn't be nested inside list items twice
+				lastOpenedNode = lastOpenedNode.parentNode.parentNode; // Don't want to stop at the ordered/unorderd list parent
+			}
+		}
+		if (lastOpenedNode.closed) { // blockquotes
+			return lastOpenedNode.parentNode
+		}else return lastOpenedNode;
+	}
+
+	let [nodeName, markerPos] = getBlockNodes(line);
+
+	if (lastOpenedNode.nodeName === "li") {
+		let nearestValidAncestor = getValidOpenedAncestor(lastOpenedNode, markerPos)
+		lastOpenedNode = nearestValidAncestor;		
+	}else if (lastOpenedNode.nodeName === "blockquote") {
+		if (nodeName === "blockquote" && lastOpenedNode.indentLevel as number - markerPos < 0) {
+		// i.e blockquotes nested inside a list won't get parsed together with ones immediately outside the list
+			lastOpenedNode = parseLine(line, lastOpenedNode.parentNode);
+			return lastOpenedNode;
+		}else if (nodeName === "blockquote") {
+			let blockQuotesDetails = line.match(/(?:>\s{0,3})+/) as RegExpMatchArray;
+			parseLine(line.slice(markerPos+blockQuotesDetails[0].length, line.length), lastOpenedNode);
+			return lastOpenedNode;
+		}else if (nodeName !== "plain text" && markerPos > 1) {
+			let tempParentNode = validListChild(lastOpenedNode, markerPos) as HtmlNode;
+			if (tempParentNode) {
+				parseLine(line, tempParentNode);
+				return lastOpenedNode; // we want to keep the parent blockquote as the last opened node so no further processing is required
+			}
+		}
+	}
+
+	// blockquotes should have their own indent level too inherited from their parents like main and list item
+	let lastChild = lastOpenedNode.children[lastOpenedNode.children.length - 1];
+	if (lastChild && lastChild.nodeName === "html block" && !lastChild.closed) {
+		nodeName = "html block" // incase it was list item or plaintext or whatever
+	}else if (lastChild && lastChild.nodeName === "fenced code" && !lastChild.closed) {
+		nodeName = "fenced code content";
+	}else if (markerPos - (lastOpenedNode.indentLevel as number) >= 4) {
+		nodeName = "indented code block"
+	}
+
+	if (nodeName === "blockquote") {
+		let blockQuotesDetails = line.match(/(?:>\s{0,3})+/) as RegExpMatchArray;
+		lastOpenedNode.children.push(
+			{parentNode: lastOpenedNode, nodeName: "blockquote", closed: false, indentLevel:lastOpenedNode.indentLevel, totalNested: count(blockQuotesDetails[0], '>'), children: []}
+		)
+		lastOpenedNode = lastOpenedNode.children[lastOpenedNode.children.length - 1];
+		parseLine(line.slice(markerPos+blockQuotesDetails[0].length, line.length), lastOpenedNode);
 	}
 
 	if (nodeName === "ol-li" || nodeName === "ul-li") {
@@ -138,89 +221,85 @@ function parseLine(line: string, lastOpenedNode: HtmlNode) {
 		if (nodeName === "ol-li") {
 			parentNodeName = "ol"
 		}else parentNodeName = "ul"
-		let fullWidth = line.match(/(\s*)(\d{1,9}(?:\.|\)))(\s*)/) || line.match(/(\s*)(\*|\+|-)(\s*)/) as RegExpMatchArray;
-		let originLastOpenedNode = lastOpenedNode;
-		lastOpenedNode = originLastOpenedNode.children.length > 0 ? 
-										originLastOpenedNode.children[originLastOpenedNode.children.length - 1] : 
-										originLastOpenedNode;
-		
-		if (lastOpenedNode.nodeName === "blockquote") {
-			if (markerPos > 2) {
-				let listItemAncestor = validListChild(lastOpenedNode, markerPos) as HtmlNode;
-				if (!listItemAncestor) {
-					nodeName = "indented code block"
-				}else lastOpenedNode = listItemAncestor;
-			}
+
+		let markerWidth;
+		let listItemPattern = line.match(/(\s*)(\d{1,9}(\.|\)))(\s*)/) || line.match(/(\s*)(\*|\+|-)(\s*)/) as RegExpMatchArray;
+		if (listItemPattern[3].length >= 4) {
+			markerWidth = listItemPattern[2].length + 1;
+		}else markerWidth = listItemPattern[2].length + listItemPattern[3].length;
+
+		let lastChild = lastOpenedNode.children[lastOpenedNode.children.length - 1];
+		if (!lastChild || lastChild.nodeName !== parentNodeName) {
+			let startNo = (parentNodeName === "ol" ? listItemPattern[2] : "");
+			lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName: parentNodeName, closed: false, startNo, children: []})
+			lastChild = lastOpenedNode.children[lastOpenedNode.children.length - 1];
 		}
-		if (nodeName !== "indented code block") {
-			if (!lastOpenedNode || lastOpenedNode.nodeName !== parentNodeName) {
-				lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName: parentNodeName, closed: false, children: []})
-				lastOpenedNode = lastOpenedNode.children[lastOpenedNode.children.length - 1];
-			}
-			lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName: "li", indentLevel: markerPos + fullWidth[2].length,closed: false, children: []})
-			lastOpenedNode = parseLine(line.slice(markerPos + fullWidth[2].length), lastOpenedNode.children[lastOpenedNode.children.length - 1]);
-			if (originLastOpenedNode.nodeName === "blockquote") {
-				lastOpenedNode = originLastOpenedNode;
-			}
+		// indent level should temporarily be zero for text on the same line as the list marker to prevent wrong indent usage
+		lastChild.children.push({parentNode: lastOpenedNode, nodeName: "li", indentLevel: 0, closed: false, children: []})
+		lastOpenedNode = lastChild.children[lastChild.children.length - 1];
+		let openedNestedNode:HtmlNode = parseLine(line.slice(markerPos + markerWidth), lastOpenedNode);
+		lastOpenedNode.indentLevel = markerPos + markerWidth; // actual indent level to be used for nested nodes
+		if (lastOpenedNode !== openedNestedNode) {
+			lastOpenedNode = openedNestedNode;
 		}
 	}
 
-	/*if (nodeName === "fenced code block") {
-	}*/
+	if (nodeName === "code fence" || nodeName === "fenced code content") {
+		let lastChild = lastOpenedNode.children[lastOpenedNode.children.length - 1];
+		let fenceDetails = line.match(/(`+)(.+)?/) as RegExpMatchArray;
+		let fenceLength = fenceDetails[1].length
+
+		if (!lastChild || lastChild.nodeName !== nodeName) {
+			let infoString = (fenceDetails[2] || "");
+			lastOpenedNode.children.push(
+				{parentNode: lastOpenedNode, nodeName: "code fence", fenceLength, closed: false, infoString, children: []}
+			)
+		}else if (lastChild.nodeName === nodeName && fenceLength === lastChild.fenceLength && !fenceDetails[2]) {
+			lastChild.closed = true;
+		}else {
+			lastChild.textContent += line;
+		}
+	}
 
 	if (nodeName === "indented code block") {
 		let lastChild = lastOpenedNode.children[lastOpenedNode.children.length - 1];
 		if (lastChild.nodeName === "indented code block" && !lastChild.closed) {
 			lastChild.textContent += line;
-		}else if (lastChild.nodeName !== "paragraph"|| lastChild.nodeName === "paragraph" && lastChild.closed) {
+		}else if (lastChild.nodeName !== "paragraph" || (lastChild.nodeName === "paragraph" && lastChild.closed)) {
 			// TODO: should the initial indented code block line be sliced?
-			lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName, closed: false, textContent:line, children: []})
-		}
+			lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName, textContent:line, children: []})
+		}else nodeName = "paragraph";
 	}
 
-	if (nodeName === "blockquote") {
-		let blockQuotesDetails = line.match(/(?:>\s{0,3})+/) as RegExpMatchArray;
-		if (lastOpenedNode.nodeName !== "blockquote") {
+	if (nodeName === "html block") {
+		let lastChild = lastOpenedNode.children[lastOpenedNode.children.length-1];
+		if (lastChild.nodeName === "paragraph" && !lastChild.closed) {
+			nodeName = "plain text"
+		}else if (!lastChild || lastChild.nodeName !== "html block" || lastChild.closed) {
 			lastOpenedNode.children.push(
-				{parentNode: lastOpenedNode, nodeName: "blockquote", closed: false, totalNested: count(blockQuotesDetails[0], '>'), children: []}
+				{parentNode: lastOpenedNode, nodeName: "htmlblock", closed: false, textContent: line, children: []}
 			)
-			lastOpenedNode = lastOpenedNode.children[lastOpenedNode.children.length - 1];
-		}
-		parseLine(line.slice(markerPos+blockQuotesDetails[0].length, line.length), lastOpenedNode);
+		}else lastChild.textContent += '\n'+ line;
 	}
 
-	if (nodeName === "paragraph"){
-		let lastChild = lastOpenedNode.children[lastOpenedNode.children.length - 1];
-		if (line.search(/\S/) == -1) {
-			if (lastOpenedNode.nodeName === "blockquote") {
-				lastOpenedNode.closed = true;
-				lastOpenedNode = lastOpenedNode.parentNode; 
-			}
-			if (lastChild && lastChild.nodeName === "paragraph") {
-				lastChild.closed = true;
-				lastOpenedNode.closed = true;
-				lastOpenedNode = lastOpenedNode.parentNode; 
-			}
-		}else if (lastChild && lastChild.nodeName === "paragraph" && !lastChild.closed) {
+	if (nodeName === "plain text"){
+		let lastOpenedContainer = getInnerMostOpenContainer(lastOpenedNode);
+		if (!lastOpenedContainer) {
+			lastOpenedContainer = lastOpenedNode;
+		}
+		let lastChild = lastOpenedContainer.children[lastOpenedContainer.children.length - 1]
+		if (lastChild && lastChild.nodeName === "paragraph" && !lastChild.closed) {
 			lastChild.textContent += line
 		}else if (!lastChild || lastChild.nodeName !== "paragraph" || lastChild.closed) {
 			lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName: "paragraph", closed: false, textContent: line, children: []})
 		}
 	}
-
 	return lastOpenedNode;
 }
 
 export default function Page({ params }: {params: {slug: string}}) {
 	// reference links aren't supported
-	const rootRef = useRef(null);
-	const preRef = useRef(null);
-	const root:HtmlNode = {parentNode: null as any, nodeName: "main", closed: false, children: []}
-	useEffect(() => {
-		rootRef.current.appendChild(getHtmlNode(root));
-		preRef.current.textContent = rootRef.current.innerHTML;
-		console.log(root);
-	}, [])
+	const root:HtmlNode = {parentNode: null as any, nodeName: "main", indentLevel: 0, closed: false, children: []}
 	const sampleText =
 `
 - List item 1
@@ -261,10 +340,9 @@ And I'm just a stand alone paragraph
 		}else return `<h${headerStr.length}></h${headerStr.length}>`
 	}
 	return (
-		<section className="flex w-100">
-			<section className="w-1/2" ref={rootRef}></section>
-			<pre className="w-1/2" ref={preRef}></pre>
+		<section>
+			{/*<section className="w-1/2"></section>*/}
+			<pre className="w-100">{getInnerHtml(root, 0)}</pre>
 		</section>
 	)
 }
-
