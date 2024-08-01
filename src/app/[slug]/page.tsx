@@ -11,9 +11,7 @@ interface HtmlNode {
 	children: HtmlNode[];
 	indentLevel?: number;
 	fenceLength?: number;
-	totalNested?: number; // for blockquotes
 	infoString?: string;
-	delimiter?: string;
 	startNo?: string;
 }
 
@@ -35,7 +33,7 @@ function getHtmlNode(htmlNode: HtmlNode) {
 }
 
 function lineIsHorizontalRule(line: string) {
-	const hrData = line.match(/^\s{0,3}(\*|-|_)(\s*\1\s*)*$/);
+	const hrData = line.match(/^\s*(\*|-|_)(\s*\1\s*)*$/);
 	let charCount = 0;
 	if (!hrData) {
 		return false
@@ -53,10 +51,14 @@ function lineIsHorizontalRule(line: string) {
 function getInnerHtml(rootNode: HtmlNode, indentLevel: number):string {
 	let text = "";
 	const whiteSpace = ' '.repeat(indentLevel);
-	if (rootNode.nodeName === "paragraph") {
+	if (rootNode.nodeName === "html block") {
+		text = `${whiteSpace}${rootNode.textContent}\n`
+	}else if (rootNode.nodeName === "paragraph") {
 		text = `${whiteSpace}<p>${rootNode.textContent}</p>\n`
 	}else if (rootNode.nodeName === "fenced code" || rootNode.nodeName === "indented code block") {
 		text = `${whiteSpace}<pre class=${rootNode.infoString || ""}>\n${whiteSpace+'  '}<code>${rootNode.textContent}\n${whiteSpace+'  '}</code>\n${whiteSpace}</pre>\n`
+	}else if (["hr"].includes(rootNode.nodeName)) {
+		text = `${whiteSpace}<${rootNode.nodeName}>\n`	
 	}else {
 		if (rootNode.nodeName === "ol") {
 			text = `${whiteSpace}<${rootNode.nodeName} start="${rootNode.startNo}">\n`	
@@ -67,11 +69,11 @@ function getInnerHtml(rootNode: HtmlNode, indentLevel: number):string {
 			if (onlyChild.nodeName === "paragraph" && !(onlyChild.textContent as string).includes('\n')) {
 				text += onlyChild.textContent;
 			}else text += `${getInnerHtml(onlyChild, indentLevel+2)}`;
-		}else {
+		}else if (rootNode.children.length >= 1){
 			for (const childNode of rootNode.children) {
 				text += `${getInnerHtml(childNode, indentLevel+2)}`;
 			}
-		}
+		}else if (!rootNode.children.length) text += rootNode.textContent;
 		text += `${whiteSpace}</${rootNode.nodeName}>\n`
 	}
 	return text;
@@ -83,9 +85,12 @@ function getBlockNodes(line: string): [string, number] {
 
 	if (markerPos > -1) {
 		nodeName = "blockquote"
+	}else if ((/\s*#{1,6}\s/).test(line)) {
+		markerPos = line.indexOf('#')
+		nodeName = "header"
 	}else if ((/^\s*```/).test(line)) {
 		markerPos = line.indexOf('`');
-		nodeName = "code fence";
+		nodeName = "fenced code";
 	}else if (lineIsHorizontalRule(line)){ // hr
 		nodeName = "hr";
 		markerPos = line.search(/\S/)
@@ -109,8 +114,7 @@ function getBlockNodes(line: string): [string, number] {
 
 // get node's ancestor with the same level of indentation
 function getValidOpenedAncestor(node: HtmlNode, indentLevel: number): HtmlNode {
-	if (node.nodeName === "main" || node.nodeName === "blockquote" ||
-			(node.nodeName === "li" && indentLevel >= (node.indentLevel as number))) {
+	if (node.nodeName === "main" || (node.nodeName === "li" && indentLevel >= (node.indentLevel as number))) {
 		return node;
 	}else {
 		return getValidOpenedAncestor(node.parentNode, indentLevel);
@@ -154,6 +158,18 @@ function getInnerMostOpenContainer(node:HtmlNode):HtmlNode|null {
 	}else return null;
 }
 
+
+function parseInlineNodes(line: string): string {
+	line = line.replaceAll(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1">')
+	line = line.replaceAll(/\[(.*?)\]\((.*?)\)/g, '<a href="$2">$1</a>');
+	line = line.replaceAll(/(\*|_)(.+)?\1/g, '<em>$2</em>');
+	line = line.replaceAll(/(\*|_)+(.+)?\1/g, '<strong>$2</strong>');
+	line = line.replaceAll(/(`+)(.+)?\1/g, '<pre><code>$2</code></pre>');
+	return line;
+}
+
+
+// TODO: parse inlines, fix nested blockquotes bug, backlash escapes, proper tab to spaces conversion
 function parseLine(line: string, lastOpenedNode: HtmlNode) {
 	if (line.search(/\S/) === -1) {
 		let lastOpenedContainer = getInnerMostOpenContainer(lastOpenedNode);
@@ -181,22 +197,44 @@ function parseLine(line: string, lastOpenedNode: HtmlNode) {
 
 	if (lastOpenedNode.nodeName === "li" && nodeName !== "plain text") {
 		lastOpenedNode = getValidOpenedAncestor(lastOpenedNode, markerPos);
-	}else if (lastOpenedNode.nodeName === "blockquote") {
+	}else if (lastOpenedNode.nodeName === "blockquote" && nodeName !== "plain text" ) {
 		if (nodeName === "blockquote" && lastOpenedNode.indentLevel as number - markerPos < 0) {
 		// i.e blockquotes nested inside a list won't get parsed together with ones immediately outside the list
 			lastOpenedNode = parseLine(line, lastOpenedNode.parentNode);
 			return lastOpenedNode;
-		}else if (nodeName === "blockquote") {
-			let blockQuotesDetails = line.match(/(?:>\s{0,3})+/) as RegExpMatchArray;
-			let parentNode = {...lastOpenedNode, indentLevel: 0} // indentLevel is set to zero to make all nested nodes believe it's actually root
-			parseLine(line.slice(markerPos+blockQuotesDetails[0].length), parentNode);
+		}else if (nodeName === "blockquote" && lastOpenedNode.parentNode !== null) {
+			// let blockQuotesDetails = line.match(/(?:>\s{0,3})+/) as RegExpMatchArray;
+			// indentLevel is set to zero && parentNode to null to make all nested nodes believe it's actually root
+			let parentNode = {...lastOpenedNode, indentLevel: 0, parentNode: null as any}
+			parseLine(line.slice(markerPos+1), parentNode);
 			return lastOpenedNode; // we want to keep the parent blockquote as the last opened node so no further processing is required
-		}else if (nodeName !== "plain text" && markerPos > 1) {
-			let tempParentNode = validListChild(lastOpenedNode, markerPos) as HtmlNode;
-			if (tempParentNode) {
-				parseLine(line, tempParentNode);
-				return lastOpenedNode; // we want to keep the parent blockquote as the last opened node so no further processing is required
+		}else if (lastOpenedNode.parentNode === null) {
+			if (markerPos > 1) {
+				let tempParentNode = validListChild(lastOpenedNode, markerPos) as HtmlNode;
+				if (tempParentNode) {
+					parseLine(line, tempParentNode);
+					return lastOpenedNode; // we want to keep the parent blockquote as the last opened node so no further processing is required
+				}
 			}
+		}else {
+			lastOpenedNode.closed = true;
+			lastOpenedNode = getValidOpenedAncestor(lastOpenedNode, markerPos);
+		}
+	}
+
+	if (nodeName === "hr") {
+		lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName, children: []})
+	}
+
+	if (nodeName === "header") {
+		let headerDetails = line.match(/(\s*)(#+)\s/)
+		if (headerDetails) {
+			let ph = headerDetails[1].length;
+			let hl = headerDetails[2].length;
+			line = parseInlineNodes(line);
+			lastOpenedNode.children.push( // TODO: content should be parsed incase of inlines first
+				{parentNode: lastOpenedNode, nodeName: `h${hl}`, textContent: line.slice(hl + ph), children: []}
+			)
 		}
 	}
 
@@ -207,29 +245,32 @@ function parseLine(line: string, lastOpenedNode: HtmlNode) {
 		}
 		let lastChild = lastOpenedContainer.children[lastOpenedContainer.children.length - 1];
 		if (lastChild && lastChild.nodeName === "paragraph" && !lastChild.closed) {
-			lastChild.textContent += line
+			line = parseInlineNodes(line);
+			lastChild.textContent += line // paragraph continuation line
 			return lastOpenedNode;
-		}else lastOpenedNode = getValidOpenedAncestor(lastOpenedNode, markerPos);
+		}else if (lastOpenedNode.parentNode) {
+			lastOpenedNode = getValidOpenedAncestor(lastOpenedNode, markerPos);
+		}
 	}
 
 	let lastChild = lastOpenedNode.children[lastOpenedNode.children.length - 1];
-	if (lastChild && lastChild.nodeName === "fenced code block" && !lastChild.closed) {
-		nodeName = "fenced code content"
+	if (lastChild && lastChild.nodeName === "fenced code" && !lastChild.closed) {
+		nodeName = "fenced code"
 	}else if (lastChild && lastChild.nodeName === "html block" && !lastChild.closed) {
 		nodeName = "html block"
 	}else if (markerPos - (lastOpenedNode.indentLevel as number) >= 4) {
 		nodeName = "indented code block"
 	}else if (nodeName === "plain text") {
+		line = parseInlineNodes(line);
 		lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName: "paragraph", closed: false, textContent: line, children: []})
 	}
 
 	if (nodeName === "blockquote") {
-		let blockQuotesDetails = line.match(/(?:>\s{0,3})+/) as RegExpMatchArray;
 		lastOpenedNode.children.push(
-			{parentNode: lastOpenedNode, nodeName: "blockquote", closed: false, indentLevel:lastOpenedNode.indentLevel, totalNested: count(blockQuotesDetails[0], '>'), children: []}
+			{parentNode: lastOpenedNode, nodeName: "blockquote", closed: false, indentLevel:lastOpenedNode.indentLevel, children: []}
 		)
 		lastOpenedNode = lastOpenedNode.children[lastOpenedNode.children.length - 1];
-		parseLine(line.slice(markerPos+blockQuotesDetails[0].length, line.length), lastOpenedNode);
+		parseLine(line.slice(markerPos+1), lastOpenedNode);
 	}
 
 	if (nodeName === "ol-li" || nodeName === "ul-li") {
@@ -261,40 +302,40 @@ function parseLine(line: string, lastOpenedNode: HtmlNode) {
 		}
 	}
 
-	if (nodeName === "code fence" || nodeName === "fenced code content") {
+	if (nodeName === "fenced code") {
 		let lastChild = lastOpenedNode.children[lastOpenedNode.children.length - 1];
 		let fenceDetails = line.match(/(`+)(.+)?/) as RegExpMatchArray;
-		let fenceLength = fenceDetails[1].length
 
-		if (!lastChild || lastChild.nodeName !== nodeName) {
-			let infoString = (fenceDetails[2] || "");
-			lastOpenedNode.children.push(
-				{parentNode: lastOpenedNode, nodeName: "code fence", fenceLength, closed: false, infoString, children: []}
-			)
-		}else if (lastChild.nodeName === nodeName && fenceLength === lastChild.fenceLength && !fenceDetails[2]) {
-			lastChild.closed = true;
+		if (fenceDetails) {
+			let fenceLength = fenceDetails[1].length
+			if (!lastChild || lastChild.nodeName !== nodeName) {
+				let infoString = (fenceDetails[2] || "");
+				lastOpenedNode.children.push(
+					{parentNode: lastOpenedNode, nodeName: "fenced code", fenceLength, closed: false, infoString, children: []}
+				)
+			}else if (((lastChild.fenceLength as number) <= fenceLength) && !fenceDetails[2]) {
+				lastChild.closed = true;
+			}else lastChild.textContent += '\n' + line;
 		}else {
-			lastChild.textContent += line;
+			lastChild.textContent += '\n' + line;
 		}
 	}
 
 	if (nodeName === "indented code block") {
 		let lastChild = lastOpenedNode.children[lastOpenedNode.children.length - 1];
 		if (lastChild.nodeName === "indented code block" && !lastChild.closed) {
-			lastChild.textContent += line;
-		}else if (lastChild.nodeName !== "paragraph" || (lastChild.nodeName === "paragraph" && lastChild.closed)) {
+			lastChild.textContent += '\n'+ line;
+		}else{
 			// TODO: should the initial indented code block line be sliced?
 			lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName, textContent:line, children: []})
-		}else nodeName = "paragraph";
+		}
 	}
 
 	if (nodeName === "html block") {
 		let lastChild = lastOpenedNode.children[lastOpenedNode.children.length-1];
-		if (lastChild.nodeName === "paragraph" && !lastChild.closed) {
-			nodeName = "plain text"
-		}else if (!lastChild || lastChild.nodeName !== "html block" || lastChild.closed) {
+		if (!lastChild || lastChild.nodeName !== "html block" || lastChild.closed) {
 			lastOpenedNode.children.push(
-				{parentNode: lastOpenedNode, nodeName: "htmlblock", closed: false, textContent: line, children: []}
+				{parentNode: lastOpenedNode, nodeName: "html block", closed: false, textContent: line, children: []}
 			)
 		}else lastChild.textContent += '\n'+ line;
 	}
@@ -308,22 +349,45 @@ export default function Page({ params }: {params: {slug: string}}) {
 	const root:HtmlNode = {parentNode: null as any, nodeName: "main", indentLevel: 0, closed: false, children: []}
 	const sampleText =
 `
+# header 1
+## header 2
+##oops not an header but a paragraph
 - List item 1
 - List item 2
+  *****
 - List item 3 with paragraph 
 embedded in a list item
   1. nested ordered list item inside the list item with a nested paragraph
   2. I'm second sha. Incoming Blockquote
 
->Blockquote of gfm markdown spec Which says 
+>>Blockquote of gfm markdown spec Which says 
 >This line is part of the preceeding blockquote by virtue of the start symbol
 And so is this line but by virtue of paragraph continuation
 > - Nested unordered list item
+>   *****
+\`\`\`js
+let fencedCode = true
+console.log("Inside a fenced code block")
+\`\`\`
 
 And I'm just a stand alone paragraph 
 that ends here
 
+*****
+![img_name](img_link)
+\`normal code span na\`
+
+<div>
+html block without an actual delimiter
+
+*emphasized text*
 me too
+
+who dey close am abeg
+
+    and now for my final trick
+    I don't know the programming language but 
+    this feels like a lot of syntax errors
 `;
 
 	const lines = sampleText.split('\n');
@@ -333,22 +397,7 @@ me too
 	for (let line of lines) {
 		lastOpenedNode = parseLine(line, lastOpenedNode);
 	}
-	
-	/* inputStr = "I am a paragraph\n\nSo am I\nNot me Though\n\n#Iwish!\n\n\nI am a paragraph";
-	let output:string;
-	output = sampleText.replaceAll(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1">')
-	output = output.replaceAll(/\[(.*?)\]\((.*?)\)/g, '<a href="$2">$1</a>');
-	output = output.replaceAll(/\s*?(#+)(.*|\s)?/g, generateHeaders);*/
-	// output = output.replaceAll(/\*+(.*?|\s)\*/g, "<b>$1</b>")
-	// output = output.replaceAll(/_+(.*?|\s)_/g, "<em>$1</em>")
 
-	function generateHeaders(match:string, headerStr: string, headerBody: string) {
-		if (headerStr.length > 6) {
-			return `<h6>${headerBody}</h6>`;
-		}else if (headerBody) {
-			return `<h${headerStr.length}>${headerBody}</h${headerStr.length}>`
-		}else return `<h${headerStr.length}></h${headerStr.length}>`
-	}
 	return (
 		<section>
 			{/*<section className="w-1/2"></section>*/}
