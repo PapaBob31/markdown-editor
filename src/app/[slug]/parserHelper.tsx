@@ -102,13 +102,34 @@ export function parseInlineNodes(line: string): string {
 		}else continue; // execution should never reach here but allow
 	}
 
+	let head: Node|null = null;
+	let lastNode: Node|null = null;
 	for (let i = 0; i < newLineTokens.length; i++) {
-		if (!newLineTokens[i].startsWith('<code')) {
-			const head = createLinkedListWith(newLineTokens[i])
-			newLineTokens[i] = parseLinksIfPresent(head);
+		if (newLineTokens[i].startsWith('<code')) {
+			if (!lastNode){
+				lastNode = {content: newLineTokens[i], type: "code span", closed: true, next: null, prev: null}	
+				head = lastNode;
+			}else {
+				lastNode.next = {content: newLineTokens[i], type: "code span", closed: true, next: null, prev: lastNode}
+				lastNode = lastNode.next
+			}		
+		}else {
+			if (lastNode) {
+				createLinkedListWith(lastNode, newLineTokens[i])
+				lastNode.next && (lastNode = lastNode.next)
+			}else {
+				lastNode = createLinkedListWith(null, newLineTokens[i])
+				head = lastNode;
+			}
 		}
 	}
-	return newLineTokens.join('');
+
+	if (!head) {
+		return "";
+	}
+	parseLinksIfPresent(head);
+	parseStrongAndEm(head);
+	return convertLinkedListToText(head);
 }
 
 interface Node {
@@ -119,10 +140,17 @@ interface Node {
 	prev: Node|null;
 }
 
-function createLinkedListWith(text: string) {
-	const head: Node = {content: "", type: "", closed: false, next: null, prev: null}
-	let currNode: Node = {content: "", type: "", closed: false, next: null, prev: head}
-	head.next = currNode;
+function createLinkedListWith(head: Node|null, text: string) {
+	let currNode:Node|null;
+	let subHead:Node|null;
+
+	if (head) {
+		currNode = head;
+		subHead = head
+	}else {
+		currNode = {content: "", type: "", closed: true, next: null, prev: null} // can this lead to unintended behaviour? check later
+		subHead = currNode;
+	}
 	let charIsEscaped = false
 
 	for (let i=0; i<text.length; i++) {
@@ -135,6 +163,14 @@ function createLinkedListWith(text: string) {
 			charIsEscaped = false;
 		}else if (text[i] === '\\') {
 			charIsEscaped = true
+		}else if (text[i] === '*' || text[i] == '_') {
+			if (currNode.type === "emphasis" && currNode.content === text[i]) {
+				currNode.type = "strong";
+				currNode.content += text[i]
+			}else {
+				currNode.next = {content: text[i], type: "emphasis", closed: false, next: null, prev: currNode};
+				currNode = currNode.next;
+			}
 		}else if ((/\s/).test(text[i])) {
 			if (currNode.type !== "white space") {
 				currNode.next = {content: text[i], type: "white space", closed: true, next: null, prev: currNode};
@@ -152,7 +188,7 @@ function createLinkedListWith(text: string) {
 			currNode = currNode.next;
 		}
 	}
-	return head;
+	return subHead;
 }
 
 function proper(titleText: string) {
@@ -233,7 +269,6 @@ function getLinkAttributes(startNode: Node) {
 	}
 }
 
-
 function convertToText(startNode: Node, stopNode: Node) {
 	let currentNode = startNode
 	let text = ""
@@ -247,32 +282,41 @@ function convertToText(startNode: Node, stopNode: Node) {
 	return text;
 }
 
+function generateLinkNode(linkText: string, destination: string, linkTitle: string): Node {
+	let linkNode = {content: "", type: "link", closed: true, next: null, prev: null};
+	let uri = destination;
+	if (uri[0] === '<' && uri[uri.length - 1] === '>') {
+		uri = uri.slice(1, uri.length-1);
+	}
+
+	linkText = linkText.replaceAll('\n', ' ');
+	if (linkTitle) { // link title
+		linkNode.content = `<a href="${uri}" title=${linkTitle}>${linkText}</a>`;
+	}else linkNode.content = `<a href="${uri}">${linkText}</a>`;
+	return linkNode;
+}
+
 function parseLinksIfPresent(listHead: Node) {
-	let parsedText = "";
-	let linkTextEndNode;
-	let unBalancedBrackets = 0;
 	let openedLinkTextMarkers = []
 	let currentNode = listHead
 
 	while (true) {
 		if (!currentNode) {
-			return parsedText
+			return listHead;
 		}
 		if (currentNode.content === '[' && !currentNode.closed) {
 			openedLinkTextMarkers.push(currentNode);
-		}
-
-		if (openedLinkTextMarkers.length > 0) {
-			if (currentNode.content === ']' && !currentNode.closed) {
+		}else if (openedLinkTextMarkers.length > 0) {
+			if (currentNode.content === ']' && !currentNode.closed && currentNode.type === "marker") {
 				let lastIndex = openedLinkTextMarkers.length - 1;
 				currentNode.closed = true;
 				openedLinkTextMarkers[lastIndex].closed = true
-				if (currentNode.next && currentNode.next.content === '(' && currentNode.type === "marker") {
+				if (currentNode.next && currentNode.next.content === '(' && currentNode.next.type === "marker") {
 					let linkAttributes = getLinkAttributes(currentNode.next)
 					if (!linkAttributes) {
 						if (openedLinkTextMarkers.length > 1) {
 							lastIndex--
-						}else parsedText += openedLinkTextMarkers[lastIndex].content; // so that it's content won't get omitted
+						}
 						currentNode = openedLinkTextMarkers[lastIndex];
 						openedLinkTextMarkers.pop();
 					}else {
@@ -280,39 +324,102 @@ function parseLinksIfPresent(listHead: Node) {
 						if (openedLinkTextMarkers[lastIndex].next !== currentNode) { // prevents [] syntax scenarios
 							linkText = convertToText(openedLinkTextMarkers[lastIndex].next as Node, currentNode.prev as Node)
 						}
-						let textBefore = "";
-						if (openedLinkTextMarkers.length > 1) {
-							textBefore = convertToText(openedLinkTextMarkers[0], openedLinkTextMarkers[lastIndex].prev as Node);
+						let linkNode = generateLinkNode(linkText, linkAttributes.destination, linkAttributes.title)
+						if (openedLinkTextMarkers[lastIndex].prev) {
+							let nodeBeforeLink = openedLinkTextMarkers[lastIndex].prev as Node
+							nodeBeforeLink.next = linkNode;
 						}
+						linkNode.next = linkAttributes.lastNodeWithAtrribute.next;
 						openedLinkTextMarkers.forEach(markerNode => {markerNode.closed = true});
 						openedLinkTextMarkers = [];
-						parsedText += textBefore + generateLink(linkText, linkAttributes.destination, linkAttributes.title)
 						currentNode = linkAttributes.lastNodeWithAtrribute
 					}
 				}else if (openedLinkTextMarkers.length === 1) { // this is the only unbalanced brackets so far
-					let lastIndex = openedLinkTextMarkers.length - 1;
-					parsedText += convertToText(openedLinkTextMarkers[lastIndex], currentNode)
 					openedLinkTextMarkers.pop();
 				}
 			}
-		}else {
-			parsedText += currentNode.content;
 		}
 		currentNode = currentNode.next as Node;
 	}
-	return parsedText
 }
 
-function generateLink(linkText: string, destination: string, linkTitle: string): string {
-	let uri = destination;
-	if (uri[0] === '<' && uri[uri.length - 1] === '>') {
-		uri = uri.slice(1, uri.length-1);
+function getMatchingMarker(markerArray: Node[], targetMarker: Node) {
+	if (markerArray.length == 0) {
+		return -1;
 	}
-	linkText = linkText.replaceAll('\n', ' ');
-	if (linkTitle) { // link title
-		return `<a href="${uri}" title=${linkTitle}>${linkText}</a>`
+	for (let i=markerArray.length-1; i>=0; i--) {
+		if (markerArray[i].type === targetMarker.type && markerArray[i].content == targetMarker.content) {
+			return i;
+		}
 	}
-	return `<a href="${uri}">${linkText}</a>`
+	return -1;
+}
+
+function convertToInlineTextNode(startNode: Node, endNode: Node|null, contentType: string): Node {
+	let newNode = {content: "", type: contentType, closed: true, next: null, prev: null};
+	if (contentType === "inline content") {
+		newNode.content += startNode.content;
+	}
+	let currentNode = startNode
+
+	while (true) {
+		currentNode = currentNode.next as Node;
+		if (currentNode === endNode) {
+			if (contentType === "strong") {
+				newNode.content = `<strong>${newNode.content}</strong>`
+			}else if (contentType === "emphasis") {
+				newNode.content = `<em>${newNode.content}</em>`
+			}
+			return newNode;
+		}else {
+			newNode.content += currentNode.content
+		}
+	}
+}
+
+// very simple case, will be expanded later
+function parseStrongAndEm(listHead: Node) {
+	let parsedText = "";
+	let openedMarkers:Node[] = []
+	let currentNode:Node|null = listHead;
+
+	while (true) {
+		if (!currentNode) {
+			return null
+		}
+
+		if ((["strong", "emphasis"]).includes(currentNode.type) && !currentNode.closed) {
+			let matchingMarkerPos = getMatchingMarker(openedMarkers, currentNode);
+			if (matchingMarkerPos > -1) {
+				let nodeBefore = openedMarkers[matchingMarkerPos].prev;
+				let nodeAfter: Node|null = currentNode.next;
+				if (nodeBefore) {
+					nodeBefore.next = convertToInlineTextNode(openedMarkers[matchingMarkerPos], currentNode, "strong");
+					currentNode = nodeBefore.next;
+					currentNode.next = nodeAfter;
+					openedMarkers = openedMarkers.slice(0, matchingMarkerPos);
+				}else {
+					currentNode = convertToInlineTextNode(openedMarkers[matchingMarkerPos], currentNode, "strong");
+					currentNode.next = nodeAfter;
+				}
+			}else openedMarkers.push(currentNode);
+		}
+		currentNode = currentNode.next;
+	}
+	return null
+}
+
+function convertLinkedListToText(listHead: Node): string {
+	let parsedText = "";
+	let currentNode:Node|null = listHead;
+
+	while (true) {
+		if (!currentNode) {
+			return parsedText;
+		}
+		parsedText += currentNode.content;
+		currentNode = currentNode.next;
+	}
 }
 
 // INLINE NODES PARSING STRATEGY
@@ -323,3 +430,24 @@ function generateLink(linkText: string, destination: string, linkTitle: string):
 // <p>!&quot;#$%&amp;'()*+,-./:;&lt;=&gt;?@[\]^_`{|}~</p>
 // Backslashes before other characters are treated as literal backslashes
 // Backslash escapes do not work in code blocks, code spans, autolinks, or raw HTML but they work in all other contexts
+
+/*
+	EMPHASIS AND STRONG EMPHASIS PARSING ALGORITHM
+
+define openedEmphasis as number
+define openedStrongs as number
+
+if textSegment is * and part of left flanking delimiter run
+	openedEmphasis.push(textSegment)
+else if textSegment is ** and part of left flanking delimiter run
+	openedStrongs.push(textSegment)
+else if textSegment is _
+	if textSegment is left flanking && (!right flanking || right flanking preceeded by punctuation)
+		openedEmphasis.push(textSegment)
+else if textSegment is __
+	if textSegment is left flanking && (!right flanking || right flanking preceeded by punctuation)
+		openedStrongs.push(textSegment)
+	else if textSegment is right flanking && (!left flanking || left flanking followed by a punctuation)
+		if (openedStrongs)
+
+*/
