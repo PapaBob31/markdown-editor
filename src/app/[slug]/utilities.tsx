@@ -44,7 +44,8 @@ export function getInnerMostOpenContainer(node:HtmlNode):HtmlNode|null {
 			return getInnerMostOpenContainer(lastChildNode);
 		}
 		return node;
-	}else if (node.nodeName === "ul" || node.nodeName === "ol" || node.nodeName === "main") {
+	}// are the first 2 condition checks even necessary, ul and ol should always have children na abi?
+	else if (node.nodeName === "ul" || node.nodeName === "ol" || node.nodeName === "main") { 
 		if (!node.children[node.children.length - 1]) {
 			return null
 		}

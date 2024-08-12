@@ -2,29 +2,6 @@ import type {HtmlNode} from "./page"
 import {validListChild, getInnerMostOpenContainer, getValidOpenedAncestor, closeNode, checkIfPartOfOtherNodeTypes} from "./utilities"
 import {getBlockNodes} from "./parserHelper"
 
-function determineProperParentNode(lastOpenedNode: HtmlNode, nodeName: string, line: string, markerPos: number) {
-	if (nodeName === "blockquote" && lastOpenedNode.indentLevel as number - markerPos < 0) {
-	// i.e blockquotes nested inside a list won't get parsed together with ones immediately outside the list
-		lastOpenedNode = parseLine(line, lastOpenedNode.parentNode);
-		return lastOpenedNode;
-	}else if (nodeName === "blockquote" && lastOpenedNode.parentNode !== null) {
-		// let blockQuotesDetails = line.match(/(?:>\s{0,3})+/) as RegExpMatchArray;
-		// indentLevel is set to zero && parentNode to null to make all nested nodes believe it's actually root
-		let parentNode = {...lastOpenedNode, indentLevel: 0, parentNode: null as any} // isn't this just a copy? How does it get attached back to the main tree?
-		parseLine(line.slice(markerPos+1), parentNode);
-		return lastOpenedNode; // we want to keep the parent blockquote as the last opened node so no further processing is required
-	}else if (lastOpenedNode.parentNode === null) {
-		if (markerPos > 1) {
-			let tempParentNode = validListChild(lastOpenedNode, markerPos) as HtmlNode;
-			if (tempParentNode) {
-				parseLine(line, tempParentNode);
-				return lastOpenedNode; // we want to keep the parent blockquote as the last opened node so no further processing is required
-			}
-		}
-	}
-	return null
-}
-
 function getHeaderNodeObj(line: string, lastOpenedNode: HtmlNode): HtmlNode {
 	let headerDetails = line.match(/(\s*)(#+)\s/) as RegExpMatchArray;
 	let ph = headerDetails[1].length;
@@ -110,6 +87,7 @@ function addListItem(nodeName: string, lastOpenedNode: HtmlNode, line: string, m
 	if (lastOpenedNode !== openedNestedNode) {
 		lastOpenedNode = openedNestedNode;
 	}
+	return lastOpenedNode;
 }
 
 // TODO: parse inlines, fix nested blockquotes bug, backslash escapes, proper tab to spaces conversion
@@ -120,22 +98,16 @@ function parseLine(line: string, lastOpenedNode: HtmlNode) {
 	}
 
 	let [nodeName, markerPos] = getBlockNodes(line);
-
+	!lastOpenedNode && console.log(line);
 	if (lastOpenedNode.nodeName === "li" && nodeName !== "plain text") {
 		lastOpenedNode = getValidOpenedAncestor(lastOpenedNode, markerPos);
-	}else if (lastOpenedNode.nodeName === "blockquote" && nodeName !== "plain text" ) {
-		let properParent = determineProperParentNode(lastOpenedNode, nodeName, line, markerPos)
-		if (properParent) return properParent;
-		if (lastOpenedNode.parentNode !== null) {
-			lastOpenedNode.closed = true;
-			lastOpenedNode = getValidOpenedAncestor(lastOpenedNode, markerPos);
-		}
-	}else if (nodeName === "plain text") {
+	}/*else if (lastOpenedNode.nodeName === "blockquote" && nodeName !== "plain text" && nodeName !== "blockquote") {
+		lastOpenedNode.closed = true;
+		lastOpenedNode = getValidOpenedAncestor(lastOpenedNode, markerPos);
+	}*/else if (nodeName === "plain text") {
 		const lineContinuedParagraph = continueOpenedParagraph(lastOpenedNode, line);
 		if (lineContinuedParagraph) {
 			return lastOpenedNode
-		}else if (lastOpenedNode.parentNode) {
-			lastOpenedNode = getValidOpenedAncestor(lastOpenedNode, markerPos); 
 		}
 	}
 	let nodeNewName = checkIfPartOfOtherNodeTypes(lastOpenedNode, markerPos);
@@ -148,13 +120,32 @@ function parseLine(line: string, lastOpenedNode: HtmlNode) {
 	}else if (nodeName === "plain text") {
 		lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName: "paragraph", closed: false, textContent: line, children: []})
 	}else if (nodeName === "blockquote") {
-		lastOpenedNode.children.push(
-			{parentNode: lastOpenedNode, nodeName: "blockquote", closed: false, indentLevel:lastOpenedNode.indentLevel, children: []}
-		)
-		lastOpenedNode = lastOpenedNode.children[lastOpenedNode.children.length - 1];
-		parseLine(line.slice(markerPos+1), lastOpenedNode);
+		if (lastOpenedNode.nodeName !== "blockquote") {
+			lastOpenedNode.children.push(
+				{parentNode: lastOpenedNode, nodeName: "blockquote", closed: false, indentLevel: lastOpenedNode.indentLevel, children: []} // Is this indent level proper?
+			)
+			lastOpenedNode = lastOpenedNode.children[lastOpenedNode.children.length - 1];
+		}else if (lastOpenedNode.nodeName === "blockquote" && (markerPos - (lastOpenedNode.indentLevel as number) < 0)) {
+			lastOpenedNode.closed = true;
+			lastOpenedNode = getValidOpenedAncestor(lastOpenedNode, markerPos);
+			lastOpenedNode.children.push(
+				{parentNode: lastOpenedNode, nodeName: "blockquote", closed: false, indentLevel: lastOpenedNode.indentLevel, children: []} // Is this indent level proper?
+			)
+			lastOpenedNode = lastOpenedNode.children[lastOpenedNode.children.length - 1];
+		}
+		
+		let actualIndentLevel = lastOpenedNode.indentLevel
+		lastOpenedNode.nodeName = "main"; // makes every nested node actually believe it's root
+		lastOpenedNode.indentLevel = 0; // makes every nested node actually believe it's root
+
+		let lastOpenedBlockChild = getInnerMostOpenContainer(lastOpenedNode);
+		lastOpenedBlockChild = lastOpenedBlockChild ? lastOpenedBlockChild : lastOpenedNode
+		parseLine(line.slice(markerPos+1), lastOpenedBlockChild);
+
+		lastOpenedNode.nodeName = "blockquote"; // restore to actual value
+		lastOpenedNode.indentLevel = actualIndentLevel; // restore to actual value
 	}else if (nodeName === "ol-li" || nodeName === "ul-li") {
-		addListItem(nodeName, lastOpenedNode, line, markerPos)
+		lastOpenedNode = addListItem(nodeName, lastOpenedNode, line, markerPos)
 	}else if (nodeName === "fenced code") {
 		addFencedCodeContent(lastOpenedNode, line);
 	}else if (nodeName === "indented code block") {
