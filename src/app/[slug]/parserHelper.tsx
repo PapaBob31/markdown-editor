@@ -289,6 +289,7 @@ function generateLinkNode(linkText: string, destination: string, linkTitle: stri
 		uri = uri.slice(1, uri.length-1);
 	}
 
+	// TODO: split up the components of the link node so that the embedded content can be parsed seperately
 	linkText = linkText.replaceAll('\n', ' ');
 	if (linkTitle) { // link title
 		linkNode.content = `<a href="${uri}" title=${linkTitle}>${linkText}</a>`;
@@ -394,12 +395,12 @@ function parseStrongAndEm(listHead: Node) {
 				let nodeBefore = openedMarkers[matchingMarkerPos].prev;
 				let nodeAfter: Node|null = currentNode.next;
 				if (nodeBefore) {
-					nodeBefore.next = convertToInlineTextNode(openedMarkers[matchingMarkerPos], currentNode, "strong");
+					nodeBefore.next = convertToInlineTextNode(openedMarkers[matchingMarkerPos], currentNode, currentNode.type);
 					currentNode = nodeBefore.next;
 					currentNode.next = nodeAfter;
 					openedMarkers = openedMarkers.slice(0, matchingMarkerPos);
 				}else {
-					currentNode = convertToInlineTextNode(openedMarkers[matchingMarkerPos], currentNode, "strong");
+					currentNode = convertToInlineTextNode(openedMarkers[matchingMarkerPos], currentNode, currentNode.type);
 					currentNode.next = nodeAfter;
 				}
 			}else openedMarkers.push(currentNode);
