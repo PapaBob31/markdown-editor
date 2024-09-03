@@ -1,5 +1,12 @@
 ## Markdown-editor
-Web based Markdown editor. Work in progress
+Web based Markdown editor.
+
+This project is officially abandoned
+
+**Reason**: I underestimated how complex the inbuilt editor was going to be and that was the whole point of the project. It was taking too much of time
+
+
+_But incase you are still interested_
 
 This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
 

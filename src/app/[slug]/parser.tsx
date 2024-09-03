@@ -16,7 +16,7 @@ function continueOpenedParagraph(lastOpenedNode: HtmlNode, line: string):boolean
 	}
 	let lastChild = lastOpenedContainer.children[lastOpenedContainer.children.length - 1];
 	if (lastChild && lastChild.nodeName === "paragraph" && !lastChild.closed) {
-		lastChild.textContent += line // paragraph continuation line
+		lastChild.textContent += '\n' + line // paragraph continuation line
 		return true;
 	}
 	return false;
@@ -44,7 +44,7 @@ function addFencedCodeContent(lastOpenedNode: HtmlNode, line: string){
 function addIndentedCodeBlockContent(lastOpenedNode: HtmlNode, line: string) {
 	let lastChild = lastOpenedNode.children[lastOpenedNode.children.length - 1];
 	if (lastChild.nodeName === "indented code block" && !lastChild.closed) {
-		lastChild.textContent += '\n'+ line;
+		lastChild.textContent += '\n' + line;
 	}else{
 		// TODO: should the initial indented code block line be sliced?
 		lastOpenedNode.children.push({parentNode: lastOpenedNode, nodeName: "indented code block", textContent:line, children: []})
@@ -57,7 +57,7 @@ function addHtmlBlockContent(lastOpenedNode: HtmlNode, line: string) {
 		lastOpenedNode.children.push(
 			{parentNode: lastOpenedNode, nodeName: "html block", closed: false, textContent: line, children: []}
 		)
-	}else lastChild.textContent += '\n'+ line;
+	}else lastChild.textContent += '\n' + line;
 }
 
 function addListItem(nodeName: string, lastOpenedNode: HtmlNode, line: string, markerPos: number) {
@@ -101,10 +101,10 @@ function parseLine(line: string, lastOpenedNode: HtmlNode) {
 	!lastOpenedNode && console.log(line);
 	if (lastOpenedNode.nodeName === "li" && nodeName !== "plain text") {
 		lastOpenedNode = getValidOpenedAncestor(lastOpenedNode, markerPos);
-	}/*else if (lastOpenedNode.nodeName === "blockquote" && nodeName !== "plain text" && nodeName !== "blockquote") {
+	}else if (lastOpenedNode.nodeName === "blockquote" && nodeName !== "plain text" && nodeName !== "blockquote") {
 		lastOpenedNode.closed = true;
 		lastOpenedNode = getValidOpenedAncestor(lastOpenedNode, markerPos);
-	}*/else if (nodeName === "plain text") {
+	}else if (nodeName === "plain text") {
 		const lineContinuedParagraph = continueOpenedParagraph(lastOpenedNode, line);
 		if (lineContinuedParagraph) {
 			return lastOpenedNode

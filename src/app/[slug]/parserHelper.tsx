@@ -1,12 +1,19 @@
 import type {HtmlNode} from "./page"
 import {lineIsHorizontalRule} from "./utilities"
 
-// human-friendly as well as browser-friendly html syntax generator
-export function createInnerHtml(rootNode: HtmlNode, indentLevel: number):string {
+interface LinkRef {
+	label: string;
+	destination: string;
+	title: string
+}
+
+const PUNCTUATIONS = "<>;,.()[]{}!`~+-*&^%$#@\\/\"':?~|";
+
+export function createInnerHtml(rootNode: HtmlNode, indentLevel: number, linkRefs: LinkRef[]):string {
 	let text = "";
 	const whiteSpace = ' '.repeat(indentLevel);
 	if (rootNode.nodeName === "paragraph" || (/h[1-6]/).test(rootNode.nodeName)) {
-		rootNode.textContent = parseInlineNodes(rootNode.textContent as string);
+		rootNode.textContent = parseInlineNodes(rootNode.textContent as string, linkRefs);
 	}
 	if (rootNode.nodeName === "html block") {
 		text = `${whiteSpace}${rootNode.textContent}\n`
@@ -15,7 +22,7 @@ export function createInnerHtml(rootNode: HtmlNode, indentLevel: number):string 
 	}else if (rootNode.nodeName === "fenced code" || rootNode.nodeName === "indented code block") {
 		text = `${whiteSpace}<pre class=${rootNode.infoString || ""}>\n${whiteSpace+'  '}<code>${rootNode.textContent}\n${whiteSpace+'  '}</code>\n${whiteSpace}</pre>\n`
 	}else if (["hr"].includes(rootNode.nodeName)) {
-		text = `${whiteSpace}<${rootNode.nodeName}>\n`	
+		text = `${whiteSpace}<${rootNode.nodeName}>\n`
 	}else {
 		if (rootNode.nodeName === "ol") {
 			text = `${whiteSpace}<${rootNode.nodeName} start="${rootNode.startNo}">\n`	
@@ -25,10 +32,10 @@ export function createInnerHtml(rootNode: HtmlNode, indentLevel: number):string 
 			let onlyChild = rootNode.children[rootNode.children.length-1];
 			if (onlyChild.nodeName === "paragraph" && !(onlyChild.textContent as string).includes('\n')) {
 				text += onlyChild.textContent;
-			}else text += `${createInnerHtml(onlyChild, indentLevel+2)}`;
+			}else text += `${createInnerHtml(onlyChild, indentLevel+2, linkRefs)}`;
 		}else if (rootNode.children.length >= 1){
 			for (const childNode of rootNode.children) {
-				text += `${createInnerHtml(childNode, indentLevel+2)}`;
+				text += `${createInnerHtml(childNode, indentLevel+2, linkRefs)}`;
 			}
 		}else if (!rootNode.children.length) text += rootNode.textContent;
 		text += `${whiteSpace}</${rootNode.nodeName}>\n`
@@ -69,67 +76,109 @@ export function getBlockNodes(line: string): [string, number] {
 	return [nodeName, markerPos];
 }
 
-export function parseInlineNodes(line: string): string {
-	let newLineTokens:string[] = []
 
-	let startIndex = 0;
-	while (true) {
-		let startToken = (/`+/).exec(line.slice(startIndex));
-		let endToken: any;
+export function traverseTreeToGetLinkRefs(rootNode: HtmlNode) {
+	let refs: LinkRef[] = [];
 
-		if (startToken) {
-			let endPattern = new RegExp("(?<!`)"+startToken[0]+"(?!`)");
-			endToken = endPattern.exec(line.slice(startIndex+startToken.index+startToken[0].length));
-			if (!endToken){
-				newLineTokens.push(line.slice(startIndex, startIndex+startToken.index+startToken[0].length))
-				startIndex = startIndex+startToken.index+startToken[0].length;
+	if (rootNode.children && rootNode.children.length > 0) {
+		for (let i=0; i<rootNode.children.length; i++) {
+			let childNode = rootNode.children[i];
+			if (["blockquote", "ul", "ol", "li"].includes(childNode.nodeName)){
+				refs.concat(traverseTreeToGetLinkRefs(childNode));
+				continue
+			}
+			if (childNode.nodeName !== "paragraph") {
 				continue;
 			}
-		}else {
-			newLineTokens.push(line.slice(startIndex))
-			break;
-		}
-		if (startToken && endToken) {
-			let tempStartIndex = startIndex+startToken.index+startToken[0].length;
-			let codeSpan = line.slice(tempStartIndex, tempStartIndex + endToken.index)
-			codeSpan = codeSpan.replaceAll(/(?:\n|\r\n)/g, " "); // as per gfm markdown spec
-			if ((codeSpan[0] === codeSpan[codeSpan.length - 1]) && codeSpan[0] === ' ') {
-				codeSpan = codeSpan.slice(1, codeSpan.length - 1).replaceAll('&', '&amp;');
-			}
-			newLineTokens.push(line.slice(startIndex, startIndex+startToken.index))
-			newLineTokens.push(`<code>${codeSpan}</code>`)
-			startIndex = tempStartIndex + endToken.index + endToken[0].length;
-		}else continue; // execution should never reach here but allow
-	}
-
-	let head: Node|null = null;
-	let lastNode: Node|null = null;
-	for (let i = 0; i < newLineTokens.length; i++) {
-		if (newLineTokens[i].startsWith('<code')) {
-			if (!lastNode){
-				lastNode = {content: newLineTokens[i], type: "code span", closed: true, next: null, prev: null}	
-				head = lastNode;
-			}else {
-				lastNode.next = {content: newLineTokens[i], type: "code span", closed: true, next: null, prev: lastNode}
-				lastNode = lastNode.next
-			}		
-		}else {
-			if (lastNode) {
-				createLinkedListWith(lastNode, newLineTokens[i])
-				lastNode.next && (lastNode = lastNode.next)
-			}else {
-				lastNode = createLinkedListWith(null, newLineTokens[i])
-				head = lastNode;
+			!childNode.textContent && console.log(childNode);
+			let linkReference = getLinkReferenceDefs(childNode.textContent as string);
+			if (linkReference) {
+				refs.push(linkReference);
+				rootNode.children.splice(i, 1)
 			}
 		}
 	}
+	return refs;
+}
 
-	if (!head) {
+function getLinkReferenceDefs(text: string) { // TODO: search and replace all escaped characters with regex
+	const linkData = text.match(/^\s{0,3}\[([^])\]:\s*((?:<.*>)|(?:\S+))(\s*(?:"|'|\()[^]+)?\s*$/);
+	const linkRefDef = {label: "", destination: "", title: ""};
+
+	if (!linkData || linkData[1].length > 999) {
+		return null
+	}else {
+		linkRefDef.label = linkData[1];
+		linkRefDef.destination = linkData[2];
+	}
+
+	if (linkData && !linkData[3]){
+		return linkRefDef
+	}
+
+	if (linkData && linkData[3]){
+		if (linkData[3].includes("\n\n") || linkData[3][0] !== linkData[3][linkData[3].length-1]) {
+			// first condition is maybe a crude way of checking if the text contais blank lines
+			return null
+		}else linkRefDef.title = linkData[3].slice(0, linkData[3].length-1);
+	}
+
+	return linkRefDef
+}
+
+// gets the end index of an html tag
+// Perhaps, It could be done better with the kmp or boyer-moore algorithm if only I knew how to implement them
+// TODO: add support for html comments. You've even started
+function getHtmlTagEndPos(tagStartIndex: number, str: string): number {
+	let currTokenType = "";
+	let lastToken = ""
+	let attrValueFirstChar = ""; // HTML attribute value first character
+	for (let i=tagStartIndex; i<str.length; i++) {
+		if (i=0 && !(/[a-zA-Z]|!/).test(str[i])) { // An ASCII alphabet must start an html tag
+			return -1
+		}else {
+			currTokenType = "tag name"
+		}
+
+		if ((currTokenType === "" || currTokenType === "white space") && str[i] === '>') {
+			return i;
+		}
+
+		if (currTokenType === "attr value" && ('"\'').includes(attrValueFirstChar)) { // html attribute quoted value
+			if (str[i] === attrValueFirstChar && ( (i+1 === str.length) || !(" />").includes(str[i+1])) ) {
+				// syntax violates html syntax spec which states quoted attribute values must be seperated from a new attribute by whitespace
+				return -1;
+			}else currTokenType = "";
+		}
+
+		if ((/\s/).test(str[i]) && currTokenType !== "white space") {
+			lastToken = currTokenType;
+			currTokenType = "white space";			
+		}else if (!(/\s/).test(str[i]) && currTokenType === "white space") {
+			if (str[i] === "/") {
+				currTokenType = "solidus"
+			}else if (lastToken === "tag name" || lastToken === "attr name") {
+				if ( ("<>\"'=").includes(str[i]) ) {
+					return -1;
+				}else currTokenType = "attr name"
+			}else if (lastToken === "attr name" && str[i] === '=') {
+				currTokenType = "value specifier"
+				continue; // prevents lastToken from becoming a null string
+			}else if (lastToken === "value specifier") {
+				currTokenType = "attr value"
+			}
+			lastToken = "";
+		}
+	}
+	return -1;
+}
+
+function getAutoLinkEndPos(startIndex: number, text: string) {
+	let matchedPattern = text.slice(startIndex).match(/<[a-zA-Z]{2,32}:\S*>/)
+	if (!matchedPattern) {
 		return "";
 	}
-	parseLinksIfPresent(head);
-	parseStrongAndEm(head);
-	return convertLinkedListToText(head);
+	return matchedPattern[0];
 }
 
 interface Node {
@@ -140,315 +189,440 @@ interface Node {
 	prev: Node|null;
 }
 
-function createLinkedListWith(head: Node|null, text: string) {
-	let currNode:Node|null;
-	let subHead:Node|null;
-
-	if (head) {
-		currNode = head;
-		subHead = head
+function addOrUpdateExistingNode(nodeType: string, newContent: string, currentNode: Node) {
+	if (!currentNode.type) { // head node
+		currentNode.type = nodeType;
+		currentNode.content = newContent;
+	}else if (currentNode.type !== nodeType || nodeType.startsWith("link marker")) {
+		currentNode.next = {type: nodeType, closed: true, content: newContent, next: null, prev: currentNode};
+		currentNode =	currentNode.next; 
 	}else {
-		currNode = {content: "", type: "", closed: true, next: null, prev: null} // can this lead to unintended behaviour? check later
-		subHead = currNode;
+		currentNode.content += newContent;
 	}
-	let charIsEscaped = false
+	if (nodeType.startsWith("link marker")) {
+		currentNode.closed = false;
+	}
+	return currentNode;
+}
 
-	for (let i=0; i<text.length; i++) {
-		if (charIsEscaped && ("[]()\\").includes(text[i])) {
-			if (currNode.type !== "inline content") {
-				currNode.next = {content: text[i], type: "inline content", closed: true, next: null, prev: currNode};
-				currNode = currNode.next;
+function processPossibleCodeSpan(startIndex: number, textStream: string): [string, number] {
+	let startDelimiter = "";
+	let potEndDelimiter = ""; // potential end delimiter
+	let contentStartIndex = -1;
+	let contentEndIndex = -1;
+	let codeSpanEndIndex = -1;
+
+	for (let i=startIndex; i<textStream.length; i++) {
+		if (textStream[i] !== '`' && !startDelimiter) {
+			startDelimiter = textStream.slice(startIndex, i);
+			contentStartIndex = i;
+		}else if (textStream[i] === '`' && startDelimiter) {
+			potEndDelimiter += textStream[i];
+		}
+		if (potEndDelimiter && (i==textStream.length-1 || textStream[i+1] !== '`')) {
+			if (potEndDelimiter === startDelimiter) {
+				codeSpanEndIndex = i;
+				contentEndIndex = i-potEndDelimiter.length;
+				break;
+			}else potEndDelimiter = "";
+		}
+
+		if (i === textStream.length - 1) {
+			if (!startDelimiter) {
+				return ["", startIndex];
 			}
-			currNode.content += text[i];
-			charIsEscaped = false;
-		}else if (text[i] === '\\') {
-			charIsEscaped = true
-		}else if (text[i] === '*' || text[i] == '_') {
-			if (currNode.type === "emphasis" && currNode.content === text[i]) {
-				currNode.type = "strong";
-				currNode.content += text[i]
-			}else {
-				currNode.next = {content: text[i], type: "emphasis", closed: false, next: null, prev: currNode};
-				currNode = currNode.next;
-			}
-		}else if ((/\s/).test(text[i])) {
-			if (currNode.type !== "white space") {
-				currNode.next = {content: text[i], type: "white space", closed: true, next: null, prev: currNode};
-				currNode = currNode.next;
-			}else {
-				currNode.content += text[i];
-			}
-		}else if (("[()]").includes(text[i])) {
-			currNode.next = {content: text[i], type: "marker", closed: false, next: null, prev: currNode};
-			currNode = currNode.next;
-		}else if (currNode.type === "inline content") {
-			currNode.content += text[i];
-		}else {
-			currNode.next = {content: text[i], type: "inline content", closed: true, next: null, prev: currNode};
-			currNode = currNode.next;
+			return ["", startIndex+startDelimiter.length-1]; // - 1 cause startDelimiter's first index is equivalent to startIndex
 		}
 	}
-	return subHead;
+	let codeContent = textStream.slice(contentStartIndex, contentEndIndex+1);
+	codeContent = codeContent.replaceAll(/\n|(?:\r\n)/g, ' ');
+	if ((/\S/).test(codeContent) && codeContent[0] === ' ' && codeContent[codeContent.length-1] === ' ') {
+		codeContent = codeContent.slice(1, codeContent.length-1);
+	}
+	return [`<code>${codeContent}</code>`, codeSpanEndIndex];
 }
 
-function proper(titleText: string) {
-	let lastIndex = titleText.length - 1
-	if (titleText.includes('\n\n')) {
+function getLinks(startIndex: number, text: string) {
+	let unBalanacedBracketsPos = [];
+	for (let i=startIndex; i<text.length; i++) {
+		if (text[i] === '[') {
+			unBalanacedBracketsPos.push(i);
+		}else if (text[i] === ']' && unBalanacedBracketsPos.length > 0 && text[i+1] === '(') {
+
+		}
+	}
+}
+
+function contentIsLeftFlanking(delimiterNode: Node) {
+	if (!(["star delimiter", "underscore delimiter"]).includes(delimiterNode.type)) {
 		return false;
-	}else if (titleText[0] === "'" && titleText[lastIndex] === "'")  {
-		return true
-	}else if (titleText[0] === '"' && titleText[lastIndex] === '"') {
-		return true
-	}else if (titleText[0] === '(' && titleText[lastIndex] === ')') {
+	}
+
+	if (!delimiterNode.next) {
+		return false;
+	}
+	if (delimiterNode.next.content[0] !== ' ' && !PUNCTUATIONS.includes(delimiterNode.next.content[0])) {
 		return true
 	}
-	return false;
+	if (!delimiterNode.prev) {
+		return false;
+	}
+	if (PUNCTUATIONS.includes(delimiterNode.next.content[0]) && (PUNCTUATIONS.includes(delimiterNode.prev.content[0]) || delimiterNode.prev.content[0] === ' ')) {
+		return true
+	}
+	return false // execution should never reach here tho but typescript mehn
 }
 
-
-function getLinkAttributes(startNode: Node) {
-	let partBeingProcessed = "link destination";
-	let linkDestination = "";
-	let linkTitle = "";
-	let unclosedParenthesis = 0
-	let currentNode = startNode.next as Node;
-
-	if (!currentNode) {
-		return null
+function contentIsRightFlanking(delimiterNode: Node) {
+	if (!(["star delimiter", "underscore delimiter"]).includes(delimiterNode.type)) {
+		return false;
 	}
+
+	if (!delimiterNode.prev) {
+		return false;
+	}
+	if (delimiterNode.prev.content[0] !== ' ' && !PUNCTUATIONS.includes(delimiterNode.prev.content[0])) {
+		return true
+	}
+	if (!delimiterNode.next) {
+		return false;
+	}
+	if (PUNCTUATIONS.includes(delimiterNode.prev.content[0]) && (PUNCTUATIONS.includes(delimiterNode.next.content[0]) || delimiterNode.next.content[0] === ' ')) {
+		return true
+	}
+	return false // execution should never reach here tho but typescript mehn
+}
+
+// transform node content into raw em|strong tag html
+function transformNodes(opener: Node, closer: Node): Node{
+	// look into the code below. the swapping and generation of nodes looks fraudulent
+	if (closer.content.length > 2 && opener.content.length > 2) {
+		opener.next = {type: "raw html", closed: true, content: "<strong>", next: opener.next, prev: opener};
+		opener.content = opener.content.slice(0, opener.content.length-2);
+
+		closer.prev = {type: "raw html", closed: true, content: "</strong>", next: closer, prev: closer.prev,};
+		closer.content = closer.content.slice(0, 3);
+		return transformNodes(opener, closer);
+	}else if (closer.content.length === 2 && opener.content.length === 2) {
+		opener.content = "<strong>"
+		opener.type = "raw html"
+
+		closer.content = "</strong>"
+		closer.type = "raw html"
+	}else if (closer.content.length === 1 && opener.content.length == 1) {
+		closer.content = "</em>"
+		closer.type = "raw html"
+
+		opener.content = "<em>"
+		opener.type = "raw html"
+	}else if (closer.content.length == 1 && opener.content.length > 1){
+		opener.next = {type: "raw html", closed: true, content: "<em>", next: opener.next, prev: opener};
+		opener.content = opener.content.slice(0, opener.content.length-1);
+
+		closer.content = "</em>"
+		closer.type = "raw html"
+	}else if (closer.content.length > 1 && opener.content.length == 1) {
+		opener.content = "<em>"
+		opener.type = "raw html"
+
+		closer.prev = {type: "raw html", closed: true, content: "</em>", next: closer, prev: closer.prev,};
+		closer.content = closer.content.slice(0, 1);
+	}
+	return closer;
+}
+
+function uselessAllMarkersBetween(startNode: Node, targetNode: Node) {
+	let currentNode = startNode.next;
+	while (true) {
+		if (!currentNode || currentNode === targetNode) {
+			break;
+		}else if (currentNode.type === startNode.type) {
+			currentNode.type = "text content";
+		}
+		currentNode = currentNode.next;
+	}
+}
+
+function getMatchingNode(ogNode: Node){
+	let matchingNode = null;
+	let currentNode = ogNode.prev;
 
 	while (true) {
-		if (partBeingProcessed === "link destination") {
-			if (currentNode.type === "white space") {
-				if (linkDestination && linkDestination[0] !== '<') {
-					partBeingProcessed = "link title"
-				}else if (linkDestination[0] === '<' && currentNode.content.includes('\n')) {
-					return null
-				}else if (!linkDestination && currentNode.next) {
-					currentNode = currentNode.next;
-					continue;
-				}else if (!currentNode.next) {
-					return null
-				}
-			}else if (currentNode.content === '(' && currentNode.type === "marker") {
-				unclosedParenthesis++;
-			}else if (currentNode.content === ')' && currentNode.type === "marker") {
-				if (unclosedParenthesis > 0) {
-					unclosedParenthesis--
-				}else {
-					return {destination: linkDestination, title: "", lastNodeWithAtrribute: currentNode}
-				}
+		if (!currentNode) {
+			break;
+		}else if (!contentIsLeftFlanking(currentNode)) {
+			currentNode = currentNode.prev;
+			continue;
+		}else if (currentNode.type === ogNode.type && currentNode.content.length === ogNode.content.length) {
+			matchingNode = currentNode;
+			break;
+		}else if (currentNode.type === ogNode.type && !matchingNode){
+			if (!matchingNode) {
+				matchingNode = currentNode; // store the nearsest type incase we never find one with matching length;
 			}
-			linkDestination += currentNode.content
-		}else if (partBeingProcessed === "link title") {
-			if (!linkTitle && currentNode.type === "white space") {
-				if (currentNode.next) {
-					currentNode = currentNode.next
-					continue;
-				}else {
-					return null
-				}
-			}else if (!linkTitle && !("\"'(").includes(currentNode.content[0])) {
+		}
+		currentNode = currentNode.prev;
+	}
+	matchingNode && uselessAllMarkersBetween(matchingNode, currentNode as Node);
+	return matchingNode;
+}
+
+
+function processEmphasisNodes(head: Node) {
+	let currentNode = head;
+	while (true) {
+		if (contentIsRightFlanking(currentNode)) {
+			let openerNode = getMatchingNode(currentNode);
+			if (!openerNode) {
+				currentNode.type = "text content";
+				continue;
+			}
+			currentNode = transformNodes(openerNode, currentNode);
+		}
+		currentNode = currentNode.next as Node;
+		if (!currentNode) break;
+	}
+}
+
+
+function getEscapedForm(char: string): string {
+	switch(char) {
+		case "<":
+			return "&lt;"
+		case '>':
+			return "&gt;"
+		case "'":
+			return "&apos;";
+		case '"':
+			return "&quot;"
+		case '(':
+			return "&lpar;";
+		case ')':
+			return "&rpar;";
+		default:
+			return char
+	}
+}
+
+// note to self: incase you are trying to be smart and a devilish regex thought is
+// springing up as a result of reviewing this code in the nearest future, U CAN'T USE REGEX!.
+// Regex isn't used because It can't match nested possible balanced brackets in link destinations.
+// It could also be a skill issue.. regardless, It's either impossible or I don't know how
+
+
+function getCharTokenType(linkDest: string, linkTitle: string, char: string, currTokenType: string) {
+	if (linkDest && linkTitle && currTokenType === "whitespace" && char !== ')') {
+		return null;
+	}else if (!linkDest && char == '<') {
+		return "opened uri";
+	}else if (!linkDest) {
+		return "uri";
+	}else if (currTokenType === "opened uri" && char === '>') {
+		return "closed uri";
+	}else if (!linkTitle && currTokenType === "whitespace") {
+		if (("\"'(").includes(char)) {
+			return "title"
+		}else return null;
+	}else if (currTokenType === "title" && char === linkTitle[0]) {
+		return "whitespace";
+	}else if (currTokenType === "closed uri") { // uris of form '<content>' should be followed immediately by whitespace
+		return null;
+	}
+	return currTokenType;
+}
+
+// get link attributes and remove nodes containing the link attributes
+function getLinkAttributes(node: Node) {
+	let linkAttributes = {uri: "", title: ""};
+	let currentTokenType = ""
+	let textStream = node.content;
+	if (textStream[0] !== '(') {
+		return null;
+	}
+	let unBalancedParenthesis = 0;
+	let nodesWithLinkAttributes = [node]
+	let i = 0;
+
+	while (true) {
+		let char = textStream[i];
+		// detect whitespaces and the first '(' char after the link text marker which is also a marker.
+		let charIsWhiteSpace = (/\s/).test(char) || (nodesWithLinkAttributes.length === 1 && i === 0);
+		if (charIsWhiteSpace) {
+			if (currentTokenType === "closed uri" || (currentTokenType === "uri" && unBalancedParenthesis === 0))  {
+				currentTokenType = "whitespace"
+			}else if (currentTokenType === "uri") {
 				return null
-			}
-			linkTitle += currentNode.content;
-			if (proper(linkTitle)) {
-				partBeingProcessed = "attributes delimiter"
 			}
 		}else {
-			if (currentNode.content === ')' && currentNode.type === "marker") {
-				return {destination: linkDestination, title: linkTitle, lastNodeWithAtrribute: currentNode}
-			}else if (currentNode.type !== "white space") {
+			currentTokenType = getCharTokenType(linkAttributes.uri, linkAttributes.title, char, currentTokenType) as string;
+			if (!currentTokenType) {
 				return null
 			}
+		}
+
+		if (char === '(' && currentTokenType === "uri") {
+			unBalancedParenthesis++;
+		}else if (char === ')' && currentTokenType === "uri" && unBalancedParenthesis > 0) {
+			unBalancedParenthesis--;
+		}else if (char === ')' && (currentTokenType === "whitespace" || currentTokenType === "uri")) {
+			break;
+		}
+
+		if (currentTokenType === "opened uri" || (currentTokenType === "uri" && !charIsWhiteSpace)) {
+			linkAttributes.uri += char;
+		}else if (currentTokenType === "title" && (!linkAttributes.title || linkAttributes.title[0] !== char)) {
+			linkAttributes.title += char;
+		}
+
+		if (i !== textStream.length - 1) {
+			i++;
+			continue;
+		}
+
+		const newNode = nodesWithLinkAttributes[nodesWithLinkAttributes.length-1].next;
+		if (newNode && newNode.type !== "raw html") {
+			nodesWithLinkAttributes.push(newNode);
+			textStream = newNode.content;
+			i = 0;
+		}else if (newNode && newNode.type === "raw html" && !linkAttributes.uri) { // we might have parsed
+			linkAttributes.uri = newNode.content;
+			i = newNode.content.length-1;
+			currentTokenType = "whitespace"
+		}else {
+			return null;
+		}
+	}
+
+	let listLength = nodesWithLinkAttributes.length;
+	if (nodesWithLinkAttributes[listLength-1].content.length !== i+1) {
+		nodesWithLinkAttributes[listLength-1].content = nodesWithLinkAttributes[listLength-1].content.slice(i+1);
+		nodesWithLinkAttributes.pop();
+	}
+
+	if (nodesWithLinkAttributes.length > 0) {
+		(nodesWithLinkAttributes[0].prev as Node).next = nodesWithLinkAttributes[listLength-1].next as Node;
+	}
+	linkAttributes.title = linkAttributes.title ? linkAttributes.title.slice(1) : "";
+	return linkAttributes;
+}
+
+function closeAllLinkMarkersInBetween(startNode: Node, endNode: Node) {
+	let currentNode = startNode.next
+	while (currentNode !== endNode) {
+		(currentNode as Node).closed = true
+		currentNode = (currentNode as Node).next;
+	}
+	
+}
+
+function generateLinkNodes(head: Node) {
+	let currentNode = head;
+	let openedLinkTextMarkers: Node[] = [];
+
+	while (true) {
+		if (currentNode.type === "link marker end" && openedLinkTextMarkers.length === 0) {
+			currentNode.type = "text content";
+		}else if (currentNode.type === "link marker start" && !currentNode.closed) {
+			openedLinkTextMarkers.push(currentNode)
+		}else if (currentNode.type === "link marker end") {
+			const linkMarkerStart = (openedLinkTextMarkers.pop() as Node)
+			linkMarkerStart.closed = true;
+			let linkAttributes = getLinkAttributes(currentNode.next as Node)
+			if (linkAttributes) {
+				closeAllLinkMarkersInBetween(linkMarkerStart, currentNode)
+				linkMarkerStart.content = `<a href="${linkAttributes.uri}" title="${linkAttributes.title}">`
+				currentNode.content = "</a>";
+			}
+			openedLinkTextMarkers.forEach(marker => {marker.closed = true});
+			openedLinkTextMarkers = [];
+			currentNode.closed = true;
 		}
 		if (!currentNode.next) {
-			return null
-		}
-		currentNode = currentNode.next;
-	}
-}
-
-function convertToText(startNode: Node, stopNode: Node) {
-	let currentNode = startNode
-	let text = ""
-
-	while (true) {
-		text += currentNode.content
-		if (currentNode === stopNode) {
 			break;
-		}else currentNode = currentNode.next as Node;
-	}
-	return text;
-}
-
-function generateLinkNode(linkText: string, destination: string, linkTitle: string): Node {
-	let linkNode = {content: "", type: "link", closed: true, next: null, prev: null};
-	let uri = destination;
-	if (uri[0] === '<' && uri[uri.length - 1] === '>') {
-		uri = uri.slice(1, uri.length-1);
-	}
-
-	// TODO: split up the components of the link node so that the embedded content can be parsed seperately
-	linkText = linkText.replaceAll('\n', ' ');
-	if (linkTitle) { // link title
-		linkNode.content = `<a href="${uri}" title=${linkTitle}>${linkText}</a>`;
-	}else linkNode.content = `<a href="${uri}">${linkText}</a>`;
-	return linkNode;
-}
-
-function parseLinksIfPresent(listHead: Node) {
-	let openedLinkTextMarkers = []
-	let currentNode = listHead
-
-	while (true) {
-		if (!currentNode) {
-			return listHead;
 		}
-		if (currentNode.content === '[' && !currentNode.closed) {
-			openedLinkTextMarkers.push(currentNode);
-		}else if (openedLinkTextMarkers.length > 0) {
-			if (currentNode.content === ']' && !currentNode.closed && currentNode.type === "marker") {
-				let lastIndex = openedLinkTextMarkers.length - 1;
-				currentNode.closed = true;
-				openedLinkTextMarkers[lastIndex].closed = true
-				if (currentNode.next && currentNode.next.content === '(' && currentNode.next.type === "marker") {
-					let linkAttributes = getLinkAttributes(currentNode.next)
-					if (!linkAttributes) {
-						if (openedLinkTextMarkers.length > 1) {
-							lastIndex--
-						}
-						currentNode = openedLinkTextMarkers[lastIndex];
-						openedLinkTextMarkers.pop();
-					}else {
-						let linkText = "";
-						if (openedLinkTextMarkers[lastIndex].next !== currentNode) { // prevents [] syntax scenarios
-							linkText = convertToText(openedLinkTextMarkers[lastIndex].next as Node, currentNode.prev as Node)
-						}
-						let linkNode = generateLinkNode(linkText, linkAttributes.destination, linkAttributes.title)
-						if (openedLinkTextMarkers[lastIndex].prev) {
-							let nodeBeforeLink = openedLinkTextMarkers[lastIndex].prev as Node
-							nodeBeforeLink.next = linkNode;
-						}
-						linkNode.next = linkAttributes.lastNodeWithAtrribute.next;
-						openedLinkTextMarkers.forEach(markerNode => {markerNode.closed = true});
-						openedLinkTextMarkers = [];
-						currentNode = linkAttributes.lastNodeWithAtrribute
-					}
-				}else if (openedLinkTextMarkers.length === 1) { // this is the only unbalanced brackets so far
-					openedLinkTextMarkers.pop();
-				}
+		currentNode = currentNode.next;
+	}
+	return head;
+}
+
+
+// generates a doubly linked list
+function generateLinkedList(text: string) {
+	const head:Node = {type: "", closed: false, content: "", next: null, prev: null}
+	let currNode = head;
+	let charIsEscaped = false;
+	let i=0;
+
+	while (i < text.length){
+		if (charIsEscaped && PUNCTUATIONS.includes(text[i])) {
+			let replacement = getEscapedForm(text[i]);
+			currNode = addOrUpdateExistingNode("text content", replacement, currNode);
+			charIsEscaped = false;
+		}else if (text[i] === '\\'){
+			charIsEscaped = true;
+		}else if (text[i] === '<') { // TODO: ESCAPE Ampersands;
+			let htmlTagEndPos = getHtmlTagEndPos(i, text);
+			if (htmlTagEndPos > -1) {
+				currNode = addOrUpdateExistingNode("raw html", text.slice(i, htmlTagEndPos + 1), currNode)
+				i = htmlTagEndPos + 1;
+				continue;
 			}
-		}
-		currentNode = currentNode.next as Node;
-	}
-}
-
-function getMatchingMarker(markerArray: Node[], targetMarker: Node) {
-	if (markerArray.length == 0) {
-		return -1;
-	}
-	for (let i=markerArray.length-1; i>=0; i--) {
-		if (markerArray[i].type === targetMarker.type && markerArray[i].content == targetMarker.content) {
-			return i;
-		}
-	}
-	return -1;
-}
-
-function convertToInlineTextNode(startNode: Node, endNode: Node|null, contentType: string): Node {
-	let newNode = {content: "", type: contentType, closed: true, next: null, prev: null};
-	if (contentType === "inline content") {
-		newNode.content += startNode.content;
-	}
-	let currentNode = startNode
-
-	while (true) {
-		currentNode = currentNode.next as Node;
-		if (currentNode === endNode) {
-			if (contentType === "strong") {
-				newNode.content = `<strong>${newNode.content}</strong>`
-			}else if (contentType === "emphasis") {
-				newNode.content = `<em>${newNode.content}</em>`
+			let autoLinkStr = getAutoLinkEndPos(i, text);
+			if (autoLinkStr) {
+				let rawHtml = `<a href="${autoLinkStr}">${autoLinkStr}</a>`;
+				currNode = addOrUpdateExistingNode("raw html", rawHtml, currNode)
+				i += autoLinkStr.length-1; // 1 is subtracted since it's zero based
+				continue;
 			}
-			return newNode;
+			let matchedPattern = text.slice(i).match(/<!--(?:[^](?!<!--))*?-->/) // prolly bad regex for matching html comments. improve later
+			if (matchedPattern) {
+				i = matchedPattern[0].length-1;
+				continue;
+			}
+			currNode = addOrUpdateExistingNode("text content", "&lt;", currNode);
+		}else if (text[i] === '`') {
+			const [codeSpan, syntaxEnd] = processPossibleCodeSpan(i, text);
+			if (codeSpan) {
+				currNode = addOrUpdateExistingNode("raw html", codeSpan, currNode);
+			}else currNode = addOrUpdateExistingNode("text content", text.slice(i, syntaxEnd+1), currNode);
+			i = syntaxEnd;
+		}else if (text[i] === '>') {
+			currNode = addOrUpdateExistingNode("text content", "&gt;", currNode);
+		}else if (text[i] === '[') {
+			currNode = addOrUpdateExistingNode("link marker start", text[i], currNode);
+		}else if (text[i] === ']') {
+			currNode = addOrUpdateExistingNode("link marker end", text[i], currNode);
+		}else if (text[i] === '*') {
+			currNode = addOrUpdateExistingNode("star delimiter", text[i], currNode);
+		}else if (text[i] === '_') {
+			currNode = addOrUpdateExistingNode("underscore delimiter", text[i], currNode);
 		}else {
-			newNode.content += currentNode.content
+			text[i] === '\\' && console.log("step 10 as how?")
+			currNode = addOrUpdateExistingNode("text content", text[i], currNode);
+			charIsEscaped = false // incase
 		}
+		i++;
 	}
+	return head;
 }
 
-// very simple case, will be expanded later
-function parseStrongAndEm(listHead: Node) {
-	let parsedText = "";
-	let openedMarkers:Node[] = []
-	let currentNode:Node|null = listHead;
 
+function convertLinkedListToText(head: Node) {
+	let currentNode = head;
+	let outputText = ""
 	while (true) {
-		if (!currentNode) {
-			return null
-		}
-
-		if ((["strong", "emphasis"]).includes(currentNode.type) && !currentNode.closed) {
-			let matchingMarkerPos = getMatchingMarker(openedMarkers, currentNode);
-			if (matchingMarkerPos > -1) {
-				let nodeBefore = openedMarkers[matchingMarkerPos].prev;
-				let nodeAfter: Node|null = currentNode.next;
-				if (nodeBefore) {
-					nodeBefore.next = convertToInlineTextNode(openedMarkers[matchingMarkerPos], currentNode, currentNode.type);
-					currentNode = nodeBefore.next;
-					currentNode.next = nodeAfter;
-					openedMarkers = openedMarkers.slice(0, matchingMarkerPos);
-				}else {
-					currentNode = convertToInlineTextNode(openedMarkers[matchingMarkerPos], currentNode, currentNode.type);
-					currentNode.next = nodeAfter;
-				}
-			}else openedMarkers.push(currentNode);
+		outputText += currentNode.content;
+		if (!currentNode.next) {
+			break;
 		}
 		currentNode = currentNode.next;
 	}
-	return null
+	return outputText;
 }
 
-function convertLinkedListToText(listHead: Node): string {
-	let parsedText = "";
-	let currentNode:Node|null = listHead;
-
-	while (true) {
-		if (!currentNode) {
-			return parsedText;
-		}
-		parsedText += currentNode.content;
-		currentNode = currentNode.next;
-	}
+function parseInlineNodes(text: string, linkRefs: LinkRef[]): string {
+	let listHead = generateLinkedList(text);
+	generateLinkNodes(listHead);
+	processEmphasisNodes(listHead);
+	return convertLinkedListToText(listHead);
 }
-
-// INLINE NODES PARSING STRATEGY
-
-// BACKSLASH
-// Any ASCII punctuation character may be backslash-escaped:
-// \!\"\#\$\%\&\'\(\)\*\+\,\-\.\/\:\;\<\=\>\?\@\[\\\]\^\_\`\{\|\}\~
-// <p>!&quot;#$%&amp;'()*+,-./:;&lt;=&gt;?@[\]^_`{|}~</p>
-// Backslashes before other characters are treated as literal backslashes
-// Backslash escapes do not work in code blocks, code spans, autolinks, or raw HTML but they work in all other contexts
-
-/*
-	EMPHASIS AND STRONG EMPHASIS PARSING ALGORITHM
-
-define openedEmphasis as number
-define openedStrongs as number
-
-if textSegment is * and part of left flanking delimiter run
-	openedEmphasis.push(textSegment)
-else if textSegment is ** and part of left flanking delimiter run
-	openedStrongs.push(textSegment)
-else if textSegment is _
-	if textSegment is left flanking && (!right flanking || right flanking preceeded by punctuation)
-		openedEmphasis.push(textSegment)
-else if textSegment is __
-	if textSegment is left flanking && (!right flanking || right flanking preceeded by punctuation)
-		openedStrongs.push(textSegment)
-	else if textSegment is right flanking && (!left flanking || left flanking followed by a punctuation)
-		if (openedStrongs)
-
-*/

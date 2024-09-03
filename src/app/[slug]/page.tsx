@@ -1,9 +1,6 @@
-"use client"
 
-// Make it Work. Make it pretty. Make it fast
-import { useRef, useEffect } from "react"
 import parse from "./parser"
-import { createInnerHtml } from "./parserHelper"
+import { createInnerHtml, traverseTreeToGetLinkRefs } from "./parserHelper"
 
 
 export interface HtmlNode {
@@ -48,17 +45,39 @@ And I'm just a stand alone paragraph
 that ends here
 
 *****
-![img_name](img_link)
-\`normal code span na\`
+- up
+  - test
+I'm also test
+- down
+  > I'm a quote nested inside a list item
+> We are not related!
+		
+\` normal code span na \`344 \`test\` shi
+
+Hey man, all I'm saying is \` console.log &copy; \` is a better name than \`print\`. Template literals in js start with \`\` \` \`\`
+
+this is bad syntax \`\`
+1 + 2 === 
+3
+\`\`
+
+They ought to be on the same line [link text](google.com "google's website")(blah)
+
+\`yes code\`
 
 <div>
 html block without an actual delimiter
 *which is why u can't be empahasized text*
 
-*emphasized text*
-me too
 
-who dey close am abeg
+*emphasized text*
+me too [easy oh](threadgently.com 'tdg')
+
+[**strong text**](damn.com)
+
+<!-- this content should be ommitted -->
+
+who dey close am abeg \\<
 
     and now for my final trick
     I don't know the programming language but 
@@ -73,11 +92,12 @@ who dey close am abeg
 	// I don't really know why I was able to cast null to any so check typescript docs later
 	let lastOpenedNode: HtmlNode = root; 
 	parse(sampleText, root);
+	const linkRefs = traverseTreeToGetLinkRefs(root);
 
 	return (
 		<section>
 			{/*<section className="w-1/2"></section>*/}
-			<pre className="w-100">{createInnerHtml(root, 0)}</pre>
+			<pre className="w-100">{createInnerHtml(root, 0, linkRefs)}</pre>
 		</section>
 	)
 }
